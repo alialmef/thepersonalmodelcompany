@@ -1,0 +1,6 @@
+# Use Bun for install/scripts; Next.js still runs on Node at runtime.
+# Bun.lock is committed for deterministic deploys (sidesteps npm cross-platform
+# optional-dependency drift).
+[install]
+exact = false
+saveTextLockfile = true

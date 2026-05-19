@@ -1,0 +1,71 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Personal Model Company",
+  "version": "0.1.0",
+  "identifier": "com.thepersonalmodelcompany.app",
+  "build": {
+    "devUrl": "http://localhost:3000",
+    "beforeBuildCommand": {
+      "script": "bun run build:tauri",
+      "cwd": "../web"
+    },
+    "frontendDist": "../web/out"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Personal Model Company",
+        "url": "/connect",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "transparent": false,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "backgroundColor": "#ffffff"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png"
+    ],
+    "category": "Productivity",
+    "copyright": "© 2026 The Personal Model Company",
+    "shortDescription": "Your personal AI agent. Trained on your own writing.",
+    "longDescription": "Train an AI model on your own writing, messages, notes, and email. You own it. Host it. Take it anywhere.",
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "12.0",
+      "exceptionDomain": "",
+      "signingIdentity": "Developer ID Application: Ali Almeflehi (XQGY763JPD)",
+      "providerShortName": "XQGY763JPD",
+      "entitlements": "entitlements.plist"
+    },
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://releases.thepersonalmodelcompany.com/{{target}}/{{current_version}}"
+      ],
+      "dialog": true,
+      "pubkey": ""
+    }
+  }
+}
