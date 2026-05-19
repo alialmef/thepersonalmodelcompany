@@ -1,0 +1,25 @@
+# Cargo / Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Tauri build artifacts
+gen/
+src-tauri/target/
+
+# macOS bundle outputs
+*.app/
+*.dmg
+
+# Tauri update signing keys (NEVER commit these)
+*.tauri.key
+*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store

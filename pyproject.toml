@@ -1,0 +1,74 @@
+[project]
+name = "pmc"
+version = "0.1.0"
+description = "Personal Model Company — train personal AI models from your own data"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+]
+
+[project.scripts]
+pmc = "pmc.orchestrator.cli:main"
+
+[project.optional-dependencies]
+ingest = [
+    "google-api-python-client>=2.0",
+    "google-auth-oauthlib>=1.0",
+    "beautifulsoup4>=4.12",
+    "python-docx>=1.0",
+    "PyPDF2>=3.0",
+]
+train = [
+    "torch>=2.3",
+    "transformers>=4.40",
+    "peft>=0.11",
+    "trl>=0.9",
+    "datasets>=2.19",
+    "bitsandbytes>=0.43",
+    "accelerate>=0.30",
+]
+eval = [
+    "anthropic>=0.25",
+    "openai>=1.30",
+]
+serve = [
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "openai>=1.30",  # OpenAI client also used for Together AI (OpenAI-compatible API)
+    "python-multipart>=0.0.9",  # FastAPI multipart/form-data for file uploads
+]
+serve-gpu = [
+    "pmc[serve]",
+    "vllm>=0.5",
+]
+modal = [
+    "modal>=0.66",
+]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "fastapi>=0.111",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+]
+all = ["pmc[ingest,train,eval,serve,dev]"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

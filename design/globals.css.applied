@@ -1,0 +1,209 @@
+/* =========================================================================
+   PMC Landing — additions to globals.css
+   =========================================================================
+   Append this to the project's existing web/app/globals.css.
+   All animations are gated behind `prefers-reduced-motion: no-preference`
+   so any user who has reduced motion enabled sees the final state instantly
+   with no animation at all.
+   ========================================================================= */
+
+@media (prefers-reduced-motion: no-preference) {
+
+  /* -----------------------------------------------------------------------
+     Universal helpers
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-simple-fade {
+    to { opacity: 1; }
+  }
+
+  @keyframes pmc-fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .pmc-anim-fade {
+    opacity: 0;
+    animation: pmc-simple-fade 0.5s ease forwards;
+  }
+
+  /* Used by Privacy / Closer / Folder for gentle entry on scroll-into-view. */
+  .pmc-in-view .pmc-fade-up {
+    opacity: 0;
+    transform: translateY(8px);
+    animation: pmc-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+
+  /* -----------------------------------------------------------------------
+     Hero choreography (page load)
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-mark-appear {
+    to { opacity: 1; }
+  }
+
+  @keyframes pmc-fuse-l {
+    from { transform: translateX(-38px); }
+    to   { transform: translateX(0); }
+  }
+
+  @keyframes pmc-fuse-r {
+    from { transform: translateX(38px); }
+    to   { transform: translateX(0); }
+  }
+
+  @keyframes pmc-flash-pulse {
+    0%   { transform: scale(0.85); opacity: 0; }
+    30%  { transform: scale(1.15); opacity: 0.4; }
+    100% { transform: scale(2.5);  opacity: 0; }
+  }
+
+  @keyframes pmc-letter-arrive {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .pmc-hero-c1 {
+    transform-origin: 140px 90px;
+    transform: translateX(-38px);
+    opacity: 0;
+    animation:
+      pmc-mark-appear 0.6s ease 0.2s forwards,
+      pmc-fuse-l 2.0s cubic-bezier(0.65, 0, 0.35, 1) 0.8s forwards;
+  }
+
+  .pmc-hero-c2 {
+    transform-origin: 140px 90px;
+    transform: translateX(38px);
+    opacity: 0;
+    animation:
+      pmc-mark-appear 0.6s ease 0.2s forwards,
+      pmc-fuse-r 2.0s cubic-bezier(0.65, 0, 0.35, 1) 0.8s forwards;
+  }
+
+  .pmc-hero-flash {
+    transform-origin: 140px 90px;
+    opacity: 0;
+    animation: pmc-flash-pulse 0.75s ease-out 2.5s forwards;
+  }
+
+  .pmc-letter {
+    display: inline-block;
+    opacity: 0;
+    transform: translateY(4px);
+    animation: pmc-letter-arrive 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    /* animation-delay is set inline per-letter by <LetterCascade> */
+  }
+
+
+  /* -----------------------------------------------------------------------
+     How it works choreography (scroll into view)
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-hiw-arrive {
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  @keyframes pmc-hiw-draw {
+    to { stroke-dashoffset: 0; }
+  }
+
+  @keyframes pmc-hiw-mark-grow {
+    0%   { opacity: 0; transform: scale(0.4); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  .pmc-hiw-title {
+    opacity: 0;
+  }
+  .pmc-in-view .pmc-hiw-title {
+    animation: pmc-simple-fade 0.5s ease 0.2s forwards;
+  }
+
+  .pmc-hiw-l-node {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  .pmc-in-view .pmc-hiw-l-node {
+    animation: pmc-hiw-arrive 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    /* animation-delay set inline per-node */
+  }
+
+  .pmc-hiw-r-node {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  .pmc-in-view .pmc-hiw-r-node {
+    animation: pmc-hiw-arrive 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .pmc-hiw-l-line {
+    stroke-dasharray: 260;
+    stroke-dashoffset: 260;
+  }
+  .pmc-in-view .pmc-hiw-l-line {
+    animation: pmc-hiw-draw 1.0s ease-out 1.1s forwards;
+  }
+
+  .pmc-hiw-r-line {
+    stroke-dasharray: 260;
+    stroke-dashoffset: 260;
+  }
+  .pmc-in-view .pmc-hiw-r-line {
+    animation: pmc-hiw-draw 1.0s ease-out 3.1s forwards;
+  }
+
+  .pmc-hiw-mark {
+    transform-origin: 310px 140px;
+    opacity: 0;
+  }
+  .pmc-in-view .pmc-hiw-mark {
+    animation: pmc-hiw-mark-grow 0.6s cubic-bezier(0.16, 1, 0.3, 1) 1.8s forwards;
+  }
+
+  .pmc-hiw-mark-label {
+    opacity: 0;
+  }
+  .pmc-in-view .pmc-hiw-mark-label {
+    animation: pmc-simple-fade 0.4s ease 2.4s forwards;
+  }
+
+  .pmc-hiw-tag {
+    opacity: 0;
+  }
+  .pmc-in-view .pmc-hiw-tag {
+    animation: pmc-simple-fade 0.5s ease 5.0s forwards;
+  }
+
+
+  /* -----------------------------------------------------------------------
+     Folder — file list lines type in on scroll
+     ----------------------------------------------------------------------- */
+
+  .pmc-folder-line {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  .pmc-in-view .pmc-folder-line {
+    animation: pmc-fade-up 0.4s ease forwards;
+    /* delay set inline per-line */
+  }
+
+
+  /* -----------------------------------------------------------------------
+     Privacy, Closer — generic fade-ups
+     ----------------------------------------------------------------------- */
+
+  .pmc-in-view h2.pmc-fade-up,
+  .pmc-in-view p.pmc-fade-up,
+  .pmc-in-view a.pmc-fade-up {
+    /* handled by .pmc-in-view .pmc-fade-up above */
+  }
+
+  .pmc-closer-mark {
+    opacity: 0;
+  }
+  .pmc-in-view .pmc-closer-mark {
+    animation: pmc-simple-fade 0.5s ease forwards;
+  }
+}
