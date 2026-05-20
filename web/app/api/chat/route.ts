@@ -15,8 +15,9 @@
  *      friendly stream explaining what's wrong instead of a 500.
  */
 
-import { convertToModelMessages, streamText, type UIMessage } from "ai";
+import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
 import { pmc, backendReachable } from "@/lib/pmc-client";
+import { chatTools } from "@/lib/tools";
 import { DEMO_USER_ID } from "@/lib/demo-user";
 
 export const runtime = "nodejs";
@@ -61,6 +62,10 @@ export async function POST(req: Request) {
   const result = streamText({
     model: pmc(userId),
     messages: await convertToModelMessages(messages),
+    tools: chatTools,
+    // Allow up to 5 tool-call → response round trips before stopping.
+    // Cap is here so a misbehaving model can't loop indefinitely.
+    stopWhen: stepCountIs(5),
   });
 
   return result.toUIMessageStreamResponse();

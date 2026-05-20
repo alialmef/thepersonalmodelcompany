@@ -84,11 +84,7 @@ export default function ChatPage() {
         {isFirstContactPending && <ThinkingBubble label="learning who you are" />}
 
         {visibleMessages.map((m) => (
-          <ChatBubble
-            key={m.id}
-            role={m.role}
-            text={messagePartsToText(m.parts)}
-          />
+          <MessageRow key={m.id} role={m.role} parts={m.parts as MessagePart[]} />
         ))}
 
         {visibleMessages.length > 0 && isWaiting && (
@@ -126,6 +122,10 @@ export default function ChatPage() {
 interface MessagePart {
   type: string;
   text?: string;
+  state?: string;
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
 }
 
 function messagePartsToText(parts: MessagePart[]): string {
@@ -133,6 +133,15 @@ function messagePartsToText(parts: MessagePart[]): string {
     .filter((p) => p.type === "text" && typeof p.text === "string")
     .map((p) => p.text as string)
     .join("");
+}
+
+/**
+ * The pretty label for a tool call. AI SDK v6 uses 'tool-<toolName>' as the
+ * part type, so we strip the prefix and humanize.
+ */
+function toolLabel(type: string): string {
+  const name = type.replace(/^tool-/, "");
+  return name.replace(/_/g, " ");
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +167,78 @@ function ChatBubble({
       </div>
     </div>
   );
+}
+
+/**
+ * Renders a single message's parts in order. Each text part becomes a
+ * bubble; each tool-call part becomes a small "used <tool> · <state>"
+ * indicator in the model column. This way you see the model's reasoning
+ * interleaved with its prose, the way you'd expect from an agent.
+ */
+function MessageRow({ role, parts }: { role: string; parts: MessagePart[] }) {
+  return (
+    <>
+      {parts.map((p, i) => {
+        if (p.type === "text") {
+          return <ChatBubble key={i} role={role} text={p.text ?? ""} />;
+        }
+        if (p.type.startsWith("tool-")) {
+          return <ToolBubble key={i} part={p} />;
+        }
+        return null;
+      })}
+    </>
+  );
+}
+
+function ToolBubble({ part }: { part: MessagePart }) {
+  const label = toolLabel(part.type);
+  const state = part.state ?? "running";
+
+  // Show one-line input summary so the chat reads as agentic activity, not
+  // opaque magic. Output stays collapsed unless the user asks for it.
+  const inputSummary = part.input ? summarizeInput(part.input) : "";
+
+  return (
+    <div className="chat-row chat-row--model">
+      <div className="chat-tool">
+        <span className="chat-tool-icon">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path
+              d="M3 6l2 2 4-5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+        <span className="chat-tool-name">{label}</span>
+        {inputSummary && (
+          <span className="chat-tool-input">{inputSummary}</span>
+        )}
+        <span className={`chat-tool-state chat-tool-state--${state}`}>
+          {state === "output-available"
+            ? "done"
+            : state === "input-streaming" || state === "input-available"
+            ? "running"
+            : state}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function summarizeInput(input: unknown): string {
+  if (typeof input !== "object" || input === null) return "";
+  const obj = input as Record<string, unknown>;
+  // Pick the first meaningful string value
+  for (const v of Object.values(obj)) {
+    if (typeof v === "string" && v.length > 0) {
+      return v.length > 60 ? v.slice(0, 60) + "…" : v;
+    }
+  }
+  return "";
 }
 
 function ThinkingBubble({ label }: { label: string }) {

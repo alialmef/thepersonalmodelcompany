@@ -490,6 +490,67 @@ def create_app(
                 },
             )
 
+        # ----- memory search (recall) -----
+        #
+        # Exposes the per-user vector store for semantic retrieval. Used by
+        # the chat tool layer's `recall_memory` tool so the model can ask
+        # "find me snippets about X" beyond what's already in its system
+        # prompt context.
+        #
+        # Lazily initializes a MemoryContextProvider — if OPENAI_API_KEY isn't
+        # configured, returns 503 with a clear reason instead of crashing.
+
+        import os
+        from pmc.serve.memory_context import MemoryContextProvider
+        from pmc.storage.paths import StoragePaths
+
+        _memory_paths = StoragePaths(storage_root)
+        _memory_provider: MemoryContextProvider | None = None
+
+        def _get_memory_provider() -> MemoryContextProvider | None:
+            nonlocal _memory_provider
+            if _memory_provider is not None:
+                return _memory_provider
+            if not os.environ.get("OPENAI_API_KEY"):
+                return None
+            from pmc.memory.embeddings import OpenAIEmbeddings
+            _memory_provider = MemoryContextProvider(
+                paths=_memory_paths,
+                embeddings=OpenAIEmbeddings(),
+            )
+            return _memory_provider
+
+        @app.post("/v1/users/{user_id}/memory/search")
+        def memory_search(user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+            provider = _get_memory_provider()
+            if provider is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="memory search unavailable — set OPENAI_API_KEY",
+                )
+            query = payload.get("query", "")
+            k = int(payload.get("k", 5))
+            if not query:
+                return {"results": []}
+
+            ctx = provider.get(user_id)
+            results = ctx.retrieve(query, k=k)
+            return {
+                "results": [
+                    {
+                        "source": r.item.source,
+                        "text": r.item.text,
+                        "score": r.score,
+                        "when": (
+                            datetime.fromtimestamp(r.item.created_at).isoformat()
+                            if r.item.created_at
+                            else None
+                        ),
+                    }
+                    for r in results
+                ]
+            }
+
         @app.delete("/v1/users/{user_id}/sources/{source_id}")
         def delete_source(user_id: str, source_id: str) -> dict[str, Any]:
             count_before = user_store.count_raw_items(user_id, source_id)
