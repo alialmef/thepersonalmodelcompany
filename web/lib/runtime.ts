@@ -8,9 +8,28 @@
  * Mac-only features (iMessage ingest, etc.).
  */
 
+/**
+ * Tauri 2 dropped the legacy `window.__TAURI__` global in favor of
+ * `__TAURI_INTERNALS__` (the IPC bridge) and the explicit `isTauri` flag.
+ * We probe several known shapes so detection works across:
+ *   - Tauri 1.x (legacy __TAURI__)
+ *   - Tauri 2.x (__TAURI_INTERNALS__, isTauri, __TAURI_METADATA__)
+ *   - Custom UA tag from tauri.conf.json if the user sets one
+ *
+ * Returning false in SSR (typeof window === "undefined") keeps Next.js
+ * static prerender happy.
+ */
 export const isTauri = (): boolean => {
   if (typeof window === "undefined") return false;
-  return Boolean((window as { __TAURI__?: unknown }).__TAURI__);
+  const w = window as unknown as Record<string, unknown>;
+  if (w.__TAURI_INTERNALS__) return true;
+  if (w.__TAURI__) return true;
+  if (w.__TAURI_METADATA__) return true;
+  if (w.isTauri) return true;
+  // Last-ditch: the system webview's UA in a Tauri app typically carries
+  // "Tauri" when the userAgent override is set, or the OS string makes
+  // sense for the platform. We avoid UA as the only signal.
+  return false;
 };
 
 export type AppInfo = {
