@@ -551,6 +551,137 @@ def create_app(
                 ]
             }
 
+        # ----- eval / first-meeting (designed app arc) -----
+        #
+        # See design/app/README.md. The eval screen collects DPO-grade
+        # preference signal between training and first chat. The first-meeting
+        # endpoint returns a generated opening line conditioned on the user's
+        # style profile.
+
+        # Five grounded situations — the V0 default. Production should draw
+        # situations from the user's own patterns (real contacts, real email
+        # types). The shape matches design/app/README.md's eval contract.
+        EVAL_SITUATIONS = [
+            "Maya texted: 'free for dinner thursday?'",
+            "A friend you haven't seen in months: 'how have you been? we should catch up'",
+            "Boss: 'can you push the deadline by a week? need to talk about it'",
+            "Group chat going off about a movie everyone loved except you",
+            "Old friend who moved away: 'i'm in town this weekend — coffee?'",
+        ]
+
+        def _eval_response_for(user_id: str, situation: str) -> str:
+            """Generate the model's draft reply to a situation.
+
+            Uses the user's adapter via the chat completions path if it's
+            registered; otherwise returns an obviously-placeholder so the UI
+            still flows and the user can keep judging.
+            """
+            try:
+                record = server.registry.require(user_id)
+            except Exception:
+                return "(your model isn't loaded yet — placeholder reply)"
+            messages = [
+                {
+                    "role": "user",
+                    "content": situation,
+                }
+            ]
+            try:
+                text, _usage = server.engine.chat(
+                    record=record,
+                    messages=server._prepared_messages(user_id, messages),
+                    max_tokens=120,
+                    temperature=0.7,
+                )
+                return text.strip()
+            except Exception as e:
+                return f"(generation error: {e})"
+
+        @app.get("/v1/users/{user_id}/eval/prompts")
+        def eval_prompts(user_id: str) -> dict[str, Any]:
+            prompts = [
+                {
+                    "id": f"eval-{i}",
+                    "situation": s,
+                    "response": _eval_response_for(user_id, s),
+                }
+                for i, s in enumerate(EVAL_SITUATIONS)
+            ]
+            return {"prompts": prompts}
+
+        @app.post("/v1/users/{user_id}/eval/judgments")
+        def eval_judgment(user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+            """Persist one judgment to a per-user JSONL. The next retrain
+            picks these up as DPO-grade preference pairs."""
+            from datetime import datetime as _dt
+            ledger = user_store.paths.user_root(user_id) / "eval_judgments.jsonl"
+            ledger.parent.mkdir(parents=True, exist_ok=True)
+            row = {
+                "ts": _dt.utcnow().isoformat() + "Z",
+                "prompt_id": payload.get("promptId"),
+                "verdict": payload.get("verdict"),
+                "edited_text": payload.get("editedText"),
+                "reason": payload.get("reason"),
+            }
+            with ledger.open("a", encoding="utf-8") as f:
+                f.write(_json.dumps(row) + "\n")
+            audit_log.log(
+                user_id, stage="eval", event="judgment_recorded",
+                data={"verdict": row["verdict"], "prompt_id": row["prompt_id"]},
+            )
+            return {"ok": True}
+
+        @app.get("/v1/users/{user_id}/first-meeting/opening")
+        def first_meeting_opening(user_id: str) -> dict[str, Any]:
+            """Generate the model's opening line — recognition → known-you-
+            forever → humility → hand over control. Conditioned on the
+            user's style profile so it lands in their own register."""
+            import json as _json2
+            identity_path = user_store.paths.user_root(user_id) / "identity.json"
+            facts: list[str] = []
+            display_name = user_id
+            if identity_path.exists():
+                try:
+                    data = _json2.loads(identity_path.read_text())
+                    facts = list(data.get("style_facts") or [])
+                    display_name = data.get("display_name") or user_id
+                except Exception:
+                    pass
+
+            # If we have an adapter, ask it to write the opening itself.
+            try:
+                record = server.registry.require(user_id)
+                style_fact_str = ", ".join(facts[:3]) if facts else "the way you write"
+                instr = (
+                    f"Write one short opening message to {display_name}. "
+                    "Address them as 'you', never 'I'. Structure: "
+                    "recognition → 'i've read everything you've ever written' "
+                    "→ humility → hand control over with a question. "
+                    f"Reflect: {style_fact_str}. One sentence each part, lowercase, no exclamation, no emoji."
+                )
+                messages = [{"role": "user", "content": instr}]
+                text, _ = server.engine.chat(
+                    record=record,
+                    messages=server._prepared_messages(user_id, messages),
+                    max_tokens=80,
+                    temperature=0.6,
+                )
+                line = text.strip()
+                if line:
+                    return {"line": line, "generated": True}
+            except Exception:
+                pass
+
+            # Fallback — the canonical opening, used when no adapter or
+            # generation fails.
+            return {
+                "line": (
+                    "there you are. i've read everything you've ever written — "
+                    "i think i get you. where do you want to start?"
+                ),
+                "generated": False,
+            }
+
         @app.delete("/v1/users/{user_id}/sources/{source_id}")
         def delete_source(user_id: str, source_id: str) -> dict[str, Any]:
             count_before = user_store.count_raw_items(user_id, source_id)
