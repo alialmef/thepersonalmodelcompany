@@ -1,0 +1,374 @@
+/* =============================================================================
+   PMC Design Tokens — Apple-grade primitives
+   =============================================================================
+   Every color, spacing, radius, motion curve, and material in the product
+   reads from this file. The names mirror Apple's HIG / UIKit / SwiftUI
+   semantic tokens so a designer or engineer familiar with Apple's system
+   reads ours fluently.
+
+   How to use:
+     - In CSS:        color: var(--label);
+     - In Tailwind:   class="text-label bg-system-background border-separator"
+                     (these are exposed via @theme in globals.css)
+     - In JS/inline:  pull from getComputedStyle if you really need to,
+                     but prefer adding a utility class.
+
+   Don't introduce raw hex values outside this file. If you find yourself
+   wanting one, add a token here first.
+   ============================================================================= */
+
+
+/* -----------------------------------------------------------------------------
+   COLORS — semantic, HIG-mirroring
+   -----------------------------------------------------------------------------
+   Naming follows Apple. `label` is the primary text color; `secondary-label`
+   is the muted variant; `tertiary-label` is the faintest. Similarly for
+   backgrounds and fills. Each token resolves to a different value in dark
+   mode below.
+   ----------------------------------------------------------------------------- */
+
+:root {
+  /* Text */
+  --label:                 #1D1D1F;                /* primary text */
+  --secondary-label:       rgba(60, 60, 67, 0.60); /* labels, captions */
+  --tertiary-label:        rgba(60, 60, 67, 0.30); /* footnotes, placeholder */
+  --quaternary-label:      rgba(60, 60, 67, 0.18); /* disabled */
+
+  /* Backgrounds — three layers of depth */
+  --system-background:           #FFFFFF;
+  --secondary-system-background: #F5F5F7;   /* card/panel fills */
+  --tertiary-system-background:  #FAFAFA;   /* deepest panel */
+  --grouped-background:          #F2F2F7;   /* iOS-style grouped list bg */
+
+  /* Fills — interactive surfaces (hover, selection) */
+  --fill:                  rgba(60, 60, 67, 0.06);   /* button hover */
+  --fill-secondary:        rgba(60, 60, 67, 0.04);   /* row hover */
+  --fill-tertiary:         rgba(60, 60, 67, 0.02);   /* faintest */
+  --fill-quaternary:       rgba(0, 0, 0, 0.01);
+
+  /* Separators (hairlines) */
+  --separator:             rgba(60, 60, 67, 0.08);   /* default 0.5px line */
+  --separator-opaque:      #E5E5E7;                  /* contrast where blur breaks 0.5px */
+
+  /* Accent — the red dot, used sparingly */
+  --tint:                  #FF3B30;                  /* systemRed equivalent */
+  --tint-hover:            #E0322A;
+  --tint-press:            #C42820;
+
+  /* Foreground variants for filled surfaces */
+  --on-tint:               #FFFFFF;
+  --on-fill:               var(--label);
+
+  /* Status */
+  --success:               #34C759;   /* systemGreen */
+  --warning:               #FF9F0A;   /* systemOrange */
+  --danger:                #FF3B30;   /* systemRed */
+
+  /* Focus ring */
+  --focus-ring:            rgba(0, 122, 255, 0.40);   /* systemBlue tint @ 40% */
+  --focus-ring-strong:     rgba(0, 122, 255, 0.55);
+}
+
+
+/* -----------------------------------------------------------------------------
+   DARK MODE — tokens flip; component CSS never has to know
+   ----------------------------------------------------------------------------- */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --label:                 #FFFFFF;
+    --secondary-label:       rgba(235, 235, 245, 0.60);
+    --tertiary-label:        rgba(235, 235, 245, 0.30);
+    --quaternary-label:      rgba(235, 235, 245, 0.18);
+
+    --system-background:           #000000;
+    --secondary-system-background: #1C1C1E;
+    --tertiary-system-background:  #2C2C2E;
+    --grouped-background:          #000000;
+
+    --fill:                  rgba(235, 235, 245, 0.12);
+    --fill-secondary:        rgba(235, 235, 245, 0.08);
+    --fill-tertiary:         rgba(235, 235, 245, 0.04);
+    --fill-quaternary:       rgba(255, 255, 255, 0.02);
+
+    --separator:             rgba(235, 235, 245, 0.12);
+    --separator-opaque:      #38383A;
+
+    --tint:                  #FF453A;
+    --tint-hover:            #FF6961;
+    --tint-press:            #E0322A;
+
+    --on-tint:               #FFFFFF;
+
+    --success:               #30D158;
+    --warning:               #FF9F0A;
+    --danger:                #FF453A;
+
+    --focus-ring:            rgba(10, 132, 255, 0.40);
+    --focus-ring-strong:     rgba(10, 132, 255, 0.55);
+  }
+}
+
+
+/* -----------------------------------------------------------------------------
+   SPACING — 4pt grid, Mac density
+   -----------------------------------------------------------------------------
+   Mac apps are denser than iOS or web. These map to Apple's standard
+   margins: 8/12/16/20/24/32. Use the named ones; only reach for raw px when
+   you're inside a primitive that needs a half-step (e.g. a 10 px gutter).
+   ----------------------------------------------------------------------------- */
+
+:root {
+  --space-0:   0;
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-7:   32px;
+  --space-8:   40px;
+  --space-9:   48px;
+  --space-10:  56px;
+  --space-12:  72px;
+  --space-16:  96px;
+}
+
+
+/* -----------------------------------------------------------------------------
+   RADIUS — corners
+   -----------------------------------------------------------------------------
+   xs (4) is for inline tags; sm (6) for input fields; md (10) for cards;
+   lg (14) for sheets/panels; xl (18) for chat bubbles; full for pills.
+   ----------------------------------------------------------------------------- */
+
+:root {
+  --radius-xs:    4px;
+  --radius-sm:    6px;
+  --radius-md:    10px;
+  --radius-lg:    14px;
+  --radius-xl:    18px;
+  --radius-full:  999px;
+}
+
+
+/* -----------------------------------------------------------------------------
+   TYPOGRAPHY — Mac SF-Pro scale
+   -----------------------------------------------------------------------------
+   Apple's Mac sizes are smaller than iOS. We codify both the size and the
+   semantic role. Display sizes only for titles. SF Pro Display kicks in
+   automatically at 20px+ on macOS.
+   ----------------------------------------------------------------------------- */
+
+:root {
+  --font-sans:    -apple-system, BlinkMacSystemFont, "SF Pro Display",
+                  "SF Pro Text", "Helvetica Neue", "Inter", system-ui, sans-serif;
+  --font-mono:    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Sizes (Mac density) */
+  --text-caption-2:     10px;
+  --text-caption:       11px;
+  --text-footnote:      12px;
+  --text-body-sm:       13px;
+  --text-body:          14px;
+  --text-subheadline:   15px;
+  --text-headline:      16px;
+  --text-title-3:       20px;
+  --text-title-2:       24px;
+  --text-title-1:       32px;
+  --text-large-title:   44px;
+
+  /* Letter spacing — Apple's negative tracking on display sizes */
+  --tracking-display:   -0.025em;
+  --tracking-headline:  -0.015em;
+  --tracking-body:      -0.005em;
+  --tracking-caption:   0.00em;
+  --tracking-uppercase: 0.06em;  /* SECTION HEADERS */
+
+  /* Weights — Apple uses 400 (regular), 500 (medium), 600 (semibold).
+     Almost never 700 (bold). */
+  --weight-regular:   400;
+  --weight-medium:    500;
+  --weight-semibold:  600;
+
+  /* Line heights */
+  --leading-tight:    1.15;
+  --leading-snug:     1.30;
+  --leading-normal:   1.45;
+  --leading-relaxed:  1.55;
+}
+
+
+/* -----------------------------------------------------------------------------
+   MOTION — Apple's curves + spring presets
+   -----------------------------------------------------------------------------
+   Apple animations feel like springs with critical damping. CSS can't do
+   true springs, but its cubic-béziers (the "emphasized" curve at index #3
+   here) closely approximate SwiftUI's default. For real springs, use the
+   Framer Motion spring presets exported from @/lib/motion (TODO).
+   ----------------------------------------------------------------------------- */
+
+:root {
+  /* Named easing functions — use these, not raw bezier */
+  --ease-standard:     cubic-bezier(0.4, 0.0, 0.2, 1);     /* default */
+  --ease-emphasized:   cubic-bezier(0.16, 1, 0.3, 1);      /* SwiftUI .easeOut feel */
+  --ease-decelerated:  cubic-bezier(0.0, 0.0, 0.2, 1);     /* enter */
+  --ease-accelerated:  cubic-bezier(0.4, 0.0, 1, 1);       /* exit */
+  --ease-bounce:       cubic-bezier(0.34, 1.56, 0.64, 1);  /* overshoot */
+
+  /* Durations — Apple's standard set */
+  --dur-instant:   80ms;
+  --dur-fast:      150ms;
+  --dur-base:      250ms;
+  --dur-slow:      400ms;
+  --dur-slower:    600ms;
+}
+
+
+/* -----------------------------------------------------------------------------
+   MATERIALS — NSVisualEffectView-style translucency recipes
+   -----------------------------------------------------------------------------
+   Each material is a recipe of backdrop-filter blur + saturation + a
+   semi-translucent fill. Use the utility class on the element you want to
+   feel like it's floating on top of content. Behaves correctly under
+   `prefers-reduced-transparency: reduce` (falls back to opaque).
+   ----------------------------------------------------------------------------- */
+
+.material-chrome {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.material-sidebar {
+  background: rgba(246, 246, 247, 0.78);
+  backdrop-filter: blur(50px) saturate(200%);
+  -webkit-backdrop-filter: blur(50px) saturate(200%);
+}
+
+.material-popover {
+  background: rgba(255, 255, 255, 0.80);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  box-shadow: 0 0 0 0.5px var(--separator),
+              0 8px 32px rgba(0, 0, 0, 0.10);
+}
+
+.material-hud {
+  background: rgba(30, 30, 30, 0.72);
+  color: #fff;
+  backdrop-filter: blur(40px) saturate(150%);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
+}
+
+.material-selection {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  .material-chrome   { background: rgba(28, 28, 30, 0.72); }
+  .material-sidebar  { background: rgba(38, 38, 40, 0.78); }
+  .material-popover  { background: rgba(38, 38, 40, 0.80); }
+  .material-selection { background: rgba(255, 255, 255, 0.06); }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .material-chrome,
+  .material-sidebar,
+  .material-popover,
+  .material-hud {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .material-chrome   { background: var(--system-background); }
+  .material-sidebar  { background: var(--secondary-system-background); }
+  .material-popover  { background: var(--system-background); }
+}
+
+
+/* -----------------------------------------------------------------------------
+   SHADOWS — almost never. Depth comes from materials.
+   -----------------------------------------------------------------------------
+   Apple uses real shadows only on floating elements (popovers, modal sheets,
+   tooltips). Flat surfaces get hairlines, not shadows. These tokens exist
+   so when you DO need a shadow it's the right one.
+   ----------------------------------------------------------------------------- */
+
+:root {
+  --shadow-hairline:  0 0 0 0.5px var(--separator-opaque);
+  --shadow-sm:        0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md:        0 4px 12px rgba(0, 0, 0, 0.06),
+                      0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-lg:        0 12px 32px rgba(0, 0, 0, 0.08),
+                      0 4px 8px rgba(0, 0, 0, 0.04);
+  --shadow-popover:   0 0 0 0.5px var(--separator),
+                      0 8px 32px rgba(0, 0, 0, 0.10);
+}
+
+
+/* -----------------------------------------------------------------------------
+   FOCUS — system-tint halo, not a box-shadow
+   -----------------------------------------------------------------------------
+   Apply via .focus-ring class or the data attribute. Tab-only via :focus-
+   visible so mice don't see it.
+   ----------------------------------------------------------------------------- */
+
+.focus-ring:focus-visible,
+[data-focus-ring]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--focus-ring);
+  transition: box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+
+/* -----------------------------------------------------------------------------
+   PRESS STATES — scale, not color
+   -----------------------------------------------------------------------------
+   Apple's tactile feel is a 0.97 scale + slight opacity dip. Use this class
+   on anything pressable.
+   ----------------------------------------------------------------------------- */
+
+.press {
+  transition: transform var(--dur-instant) var(--ease-standard),
+              opacity var(--dur-instant) var(--ease-standard);
+}
+
+.press:active:not(:disabled) {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+
+
+/* -----------------------------------------------------------------------------
+   DISABLED — alpha, not grey-out
+   ----------------------------------------------------------------------------- */
+
+[aria-disabled='true'],
+:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+
+/* -----------------------------------------------------------------------------
+   HAIRLINES — true 0.5px, not 1px
+   -----------------------------------------------------------------------------
+   These are the borders Apple uses for list separators and panel edges.
+   They render as a single device pixel on 2x retina.
+   ----------------------------------------------------------------------------- */
+
+.hairline-t  { border-top:    0.5px solid var(--separator); }
+.hairline-b  { border-bottom: 0.5px solid var(--separator); }
+.hairline-l  { border-left:   0.5px solid var(--separator); }
+.hairline-r  { border-right:  0.5px solid var(--separator); }
+.hairline    { border:        0.5px solid var(--separator); }
+
+
+/* -----------------------------------------------------------------------------
+   TABULAR NUMBERS — for stats, timers, loss values, etc.
+   ----------------------------------------------------------------------------- */
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" on;
+}
