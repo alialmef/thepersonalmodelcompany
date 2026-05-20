@@ -1,54 +1,57 @@
+'use client';
+
 /**
- * The PMC brand mark — circle + red center dot, matching the app icon.
+ * The brand mark. A single circle with an optional red dot at its center.
  *
- * Proportions taken directly from design/icon/app-icon-1024-bold.svg:
- *   - viewBox 1024x1024
- *   - circle r=270, stroke=20 (≈1.95% of viewBox)
- *   - dot r=42
+ * The dot signals "your model is active." It appears on every in-app screen
+ * once the user has begun their personal model — from the download screen
+ * forward. It pulses on a 2.6s breath cycle.
  *
- * Used everywhere from the 92px ceremonial mark at first-meeting down to
- * the 16px inline mark on chat bubbles. The dot's pulse animation is
- * defined in globals.css (`.pmc-mark-dot` → `pmc-dot-pulse` keyframes),
- * not here — the static SVG just renders the geometry.
- *
- * Note: this is the transparent in-UI variant — no white rounded-square
- * background. That backing is reserved for the app-icon treatment in
- * the Dock / Finder / favicon (web/public/icon.svg).
+ * Sizes used in the app:
+ *   - 32px: in step headers (Connect, Curate, Train)
+ *   - 48px:  in closer / static brand placements
+ *   - 100px: in the first-launch hero and download screen
  */
-export function BrandMark({
-  size = 24,
-  pulsing = true,
-  className,
-}: {
+
+interface BrandMarkProps {
   size?: number;
-  /** When false, the dot renders static (no pulse) — for the very first
-   *  frame of first-meeting before the bloom animation takes over. */
-  pulsing?: boolean;
+  withDot?: boolean;
   className?: string;
-}) {
+}
+
+export function BrandMark({
+  size = 32,
+  withDot = true,
+  className = '',
+}: BrandMarkProps) {
+  const r = size * 0.38;
+  const dotR = Math.max(1.5, size * 0.03);
+
   return (
     <svg
-      viewBox="0 0 1024 1024"
+      viewBox={`0 0 ${size} ${size}`}
       width={size}
       height={size}
-      aria-hidden="true"
       className={className}
+      aria-hidden="true"
     >
       <circle
-        cx="512"
-        cy="512"
-        r="270"
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
         fill="none"
         stroke="#1D1D1F"
-        strokeWidth="20"
+        strokeWidth="0.75"
       />
-      <circle
-        cx="512"
-        cy="512"
-        r="42"
-        fill="#FF3B30"
-        className={pulsing ? "pmc-mark-dot" : undefined}
-      />
+      {withDot && (
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={dotR}
+          fill="#FF3B30"
+          className="pmc-mark-dot"
+        />
+      )}
     </svg>
   );
 }

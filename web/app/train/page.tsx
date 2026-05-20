@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 
+import { TrainInProgress } from "@/components/app/train-screen";
 import { DEMO_USER_ID } from "@/lib/demo-user";
 
 const PMC_API_URL =
@@ -11,88 +11,51 @@ const PMC_API_URL =
   process.env.NEXT_PUBLIC_API_URL ??
   "http://localhost:8000";
 
-const STAGES = [
-  { key: "curate", label: "curating your writing" },
-  { key: "train", label: "training your model" },
-  { key: "eval", label: "evaluating" },
-  { key: "publish", label: "packaging your model" },
-] as const;
-
-type StageKey = (typeof STAGES)[number]["key"];
-
 interface AuditEvent {
   timestamp?: string;
   stage?: string;
   event?: string;
   data?: Record<string, unknown>;
-  // job_finished frames have a different shape:
   status?: string;
-  job_id?: string;
-  result?: unknown;
-  elapsed_seconds?: number | null;
-  message?: string;
 }
 
-interface Activity {
-  ts: number;
-  stage: StageKey | "other";
-  text: string;
+interface TrainingStats {
+  loss: number;
+  step: number;
+  totalSteps: number;
+  series: Array<{ step: number; loss: number }>;
+  etaMinutes: number;
 }
 
 /**
- * Act 3 — live training progress.
+ * Screen 5 — Training your model.
  *
- * The middle of the user journey: between connect and chat is a black hole
- * where training happens. This page makes the wait honest, alive, and
- * unembarrassing — every event from the backend shows up as a line in the
- * activity feed, the four stages light up in order, and "you can close this
- * window" is reassuring instead of evasive.
+ * Consumes the backend SSE event stream and surfaces the train-stage events
+ * as live training statistics for the loss curve. Filters to `mlx_step`
+ * events emitted by `pmc/train/mlx_trainer.py` and tracks (step, loss)
+ * points as they arrive.
  *
- * Wire: the connect page POSTs to /v1/users/{id}/runs to start a job, then
- * router.push(`/train?job={jobId}`). This page connects EventSource directly
- * to the backend's SSE endpoint and renders what arrives.
+ * On `job_finished` → /eval (which then leads to /first-meeting and /chat).
  */
-export default function TrainPage() {
-  // useSearchParams requires a Suspense boundary at this level in Next 15+.
-  return (
-    <Suspense fallback={<NoJobState />}>
-      <TrainPageInner />
-    </Suspense>
-  );
-}
-
 function TrainPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const jobId = searchParams.get("job");
   const userId = searchParams.get("user") ?? DEMO_USER_ID;
 
-  const [currentStage, setCurrentStage] = useState<StageKey>("curate");
-  const [completedStages, setCompletedStages] = useState<Set<StageKey>>(new Set());
-  const [activity, setActivity] = useState<Activity[]>([]);
-  const [elapsed, setElapsed] = useState(0);
+  const [stats, setStats] = useState<TrainingStats>({
+    loss: 0,
+    step: 0,
+    totalSteps: 100,
+    series: [],
+    etaMinutes: 40,
+  });
   const [done, setDone] = useState<"ok" | "fail" | null>(null);
-  const [doneSummary, setDoneSummary] = useState<string>("");
   const startedAtRef = useRef<number>(Date.now());
 
-  // ---------- elapsed time ticker ----------
   useEffect(() => {
-    const id = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  // ---------- SSE consumer ----------
-  useEffect(() => {
-    if (!jobId) {
-      // No job — show a calm "no job" state. Useful for design preview too.
-      return;
-    }
-
-    const url = `${PMC_API_URL}/v1/users/${encodeURIComponent(
-      userId,
-    )}/runs/${encodeURIComponent(jobId)}/events`;
+    if (!jobId) return;
+    const url = `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/runs/${encodeURIComponent(jobId)}/events`;
     const es = new EventSource(url);
 
     es.onmessage = (msg) => {
@@ -106,197 +69,93 @@ function TrainPageInner() {
       } catch {
         return;
       }
-      handleEvent(parsed);
-    };
-    es.onerror = () => {
-      // Browser auto-reconnects; we don't need to do anything special.
-    };
 
-    return () => {
-      es.close();
-    };
-  }, [jobId, userId]);
-
-  function handleEvent(ev: AuditEvent) {
-    // Final job_finished frame
-    if (ev.event === "job_finished") {
-      if (ev.status === "completed") {
-        setDone("ok");
-        setDoneSummary("model is ready");
-        // The designed flow goes train → eval → first-meeting → chat.
-        setTimeout(() => router.push(`/eval?user=${encodeURIComponent(userId)}`), 1800);
-      } else {
-        setDone("fail");
-        setDoneSummary(`training ${ev.status ?? "failed"} — see logs`);
+      if (parsed.event === "job_finished") {
+        if (parsed.status === "completed") {
+          setDone("ok");
+          setTimeout(
+            () => router.push(`/eval?user=${encodeURIComponent(userId)}`),
+            1800,
+          );
+        } else {
+          setDone("fail");
+        }
+        es.close();
+        return;
       }
-      return;
-    }
 
-    if (ev.event === "timeout") {
-      setDone("fail");
-      setDoneSummary(ev.message ?? "no progress for 10 minutes");
-      return;
-    }
+      // Pull mlx training metrics.
+      const data = parsed.data ?? {};
+      if (parsed.event === "mlx_train_starting") {
+        const iters = typeof data.iters === "number" ? data.iters : 100;
+        setStats((s) => ({ ...s, totalSteps: iters }));
+      } else if (parsed.event === "mlx_step" && typeof data.step === "number") {
+        const step = data.step;
+        const loss =
+          typeof data.train_loss === "number"
+            ? data.train_loss
+            : typeof data.val_loss === "number"
+            ? data.val_loss
+            : null;
+        if (loss === null) return;
 
-    // Normal stage event
-    const stage = (ev.stage ?? "other") as StageKey | "other";
-    if (stage !== "other" && STAGES.some((s) => s.key === stage)) {
-      setCurrentStage(stage);
-      // Mark previous stages as complete based on canonical order
-      setCompletedStages((prev) => {
-        const next = new Set(prev);
-        const idx = STAGES.findIndex((s) => s.key === stage);
-        for (let i = 0; i < idx; i++) next.add(STAGES[i].key);
-        return next;
-      });
-    }
+        setStats((s) => {
+          const series = [...s.series, { step, loss }];
+          // ETA: extrapolate from current rate.
+          const elapsedMin = (Date.now() - startedAtRef.current) / 60_000;
+          const remain =
+            step > 0
+              ? Math.max(1, Math.round((s.totalSteps - step) * (elapsedMin / step)))
+              : s.etaMinutes;
+          return { ...s, loss, step, series, etaMinutes: remain };
+        });
+      } else if (parsed.event === "mlx_train_completed") {
+        const finalLoss = typeof data.train_loss === "number" ? data.train_loss : stats.loss;
+        setStats((s) => ({ ...s, loss: finalLoss, step: s.totalSteps }));
+      }
+    };
 
-    // Append to activity feed (most recent first)
-    setActivity((prev) =>
-      [
-        {
-          ts: ev.timestamp ? new Date(ev.timestamp).getTime() : Date.now(),
-          stage: (stage === "other" ? "other" : stage) as StageKey | "other",
-          text: formatEvent(ev),
-        },
-        ...prev,
-      ].slice(0, 60),
+    return () => es.close();
+  }, [jobId, userId, router, stats.loss]);
+
+  if (!jobId) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-[620px] items-center justify-center bg-white px-7">
+        <p className="text-[13px] text-neutral-500">no training in progress</p>
+      </main>
     );
   }
 
-  const elapsedLabel = useMemo(() => formatElapsed(elapsed), [elapsed]);
-
-  if (!jobId) {
-    return <NoJobState />;
-  }
-
-  return (
-    <main className="train-root">
-      <header className="train-header">
-        <Link href="/connect" className="train-brand">
-          The Personal Model Company
-        </Link>
-        <span className="train-elapsed">{elapsedLabel}</span>
-      </header>
-
-      <section className="train-stage-section">
-        <h1 className="train-title">
-          {done === "ok"
-            ? "your model is ready"
-            : done === "fail"
-            ? doneSummary
-            : "training your model"}
+  if (done === "ok") {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-[620px] flex-col items-center justify-center bg-white px-7">
+        <h1 className="text-[32px] font-medium tracking-[-0.03em] text-neutral-900">
+          your model is ready.
         </h1>
-        {done === null && (
-          <p className="train-subtitle">
-            this usually takes 60 – 180 minutes. you can close this window and
-            come back — we&apos;ll keep going.
-          </p>
-        )}
-
-        <ol className="train-stages">
-          {STAGES.map((s) => {
-            const isCurrent = s.key === currentStage && done === null;
-            const isComplete = completedStages.has(s.key) || done === "ok";
-            return (
-              <li
-                key={s.key}
-                className={`train-stage ${
-                  isComplete
-                    ? "train-stage--done"
-                    : isCurrent
-                    ? "train-stage--current"
-                    : "train-stage--pending"
-                }`}
-              >
-                <span className="train-stage-dot" />
-                <span className="train-stage-label">{s.label}</span>
-                {isCurrent && (
-                  <span className="train-stage-spinner" aria-hidden="true">
-                    <span /><span /><span />
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      </section>
-
-      <section className="train-activity">
-        <h2 className="train-activity-title">activity</h2>
-        {activity.length === 0 ? (
-          <p className="train-activity-empty">waiting for first event…</p>
-        ) : (
-          <ul className="train-activity-list">
-            {activity.map((a, i) => (
-              <li key={i} className="train-activity-item">
-                <span
-                  className={`train-activity-tag train-activity-tag--${a.stage}`}
-                >
-                  {a.stage}
-                </span>
-                <span className="train-activity-text">{a.text}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </main>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-function formatElapsed(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s.toString().padStart(2, "0")}s`;
-  return `${s}s`;
-}
-
-function formatEvent(ev: AuditEvent): string {
-  // Audit events come in (stage, event, data). Render concisely.
-  const evName = ev.event ?? "event";
-  const data = ev.data ?? {};
-  const dataBits = Object.entries(data)
-    .filter(([_, v]) => typeof v !== "object" || v === null)
-    .map(([k, v]) => `${k}=${formatValue(v)}`)
-    .join(" ");
-  return dataBits ? `${evName}  ${dataBits}` : evName;
-}
-
-function formatValue(v: unknown): string {
-  if (typeof v === "number") {
-    return Number.isInteger(v) ? String(v) : v.toFixed(3);
+      </main>
+    );
   }
-  if (typeof v === "string") {
-    return v.length > 60 ? v.slice(0, 60) + "…" : v;
-  }
-  return String(v);
-}
 
-function NoJobState() {
-  return (
-    <main className="train-root">
-      <header className="train-header">
-        <Link href="/connect" className="train-brand">
-          The Personal Model Company
-        </Link>
-      </header>
-      <section className="train-stage-section train-stage-section--empty">
-        <h1 className="train-title">no training in progress</h1>
-        <p className="train-subtitle">
-          start a training run from{" "}
-          <Link href="/connect" className="train-inline-link">
-            connect
-          </Link>{" "}
-          and you&apos;ll land back here.
+  if (done === "fail") {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-[620px] flex-col items-center justify-center bg-white px-7">
+        <h1 className="text-[24px] font-medium tracking-[-0.02em] text-neutral-900">
+          training failed.
+        </h1>
+        <p className="mt-2 text-[14px] text-neutral-500">
+          see ~/.pmc-dev/storage/users/{userId}/audit.jsonl
         </p>
-      </section>
-    </main>
+      </main>
+    );
+  }
+
+  return <TrainInProgress stats={stats} />;
+}
+
+export default function TrainPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-white" />}>
+      <TrainPageInner />
+    </Suspense>
   );
 }

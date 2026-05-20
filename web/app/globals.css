@@ -306,347 +306,22 @@ body {
 
 
 /* =========================================================================
-   Chat (Act 5) — your model, talking with you
+   PMC App Screens — additions to globals.css
    =========================================================================
-   Dark, vertical, iMessage-rhythm. The first frame is one bubble — the model
-   speaking first. Everything else is hidden until needed.
-   ========================================================================= */
-
-.chat-root {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
-  background: #0a0a0c;
-  color: #f5f5f7;
-  font-family: var(--font-sans);
-  overflow: hidden;
-}
-
-.chat-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  flex-shrink: 0;
-}
-
-.chat-brand {
-  font-size: 13px;
-  font-weight: 500;
-  color: #8a8a92;
-  text-decoration: none;
-  letter-spacing: -0.005em;
-  transition: color 0.15s;
-}
-
-.chat-brand:hover {
-  color: #f5f5f7;
-}
-
-.chat-settings {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  color: #6b6b73;
-  font-size: 18px;
-  text-decoration: none;
-  letter-spacing: 1px;
-  transition: background 0.15s, color 0.15s;
-}
-
-.chat-settings:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #f5f5f7;
-}
-
-.chat-stream {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px 24px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  scroll-behavior: smooth;
-}
-
-.chat-row {
-  display: flex;
-  width: 100%;
-  max-width: 720px;
-  margin: 0 auto;
-}
-
-.chat-row--user {
-  justify-content: flex-end;
-}
-
-.chat-row--model {
-  justify-content: flex-start;
-}
-
-.chat-bubble {
-  max-width: 80%;
-  padding: 12px 16px;
-  border-radius: 18px;
-  font-size: 15px;
-  line-height: 1.45;
-  letter-spacing: -0.005em;
-  word-wrap: break-word;
-  white-space: pre-wrap;
-  animation: chat-bubble-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.chat-bubble--user {
-  background: #2c7cf0;
-  color: #ffffff;
-  border-bottom-right-radius: 6px;
-}
-
-.chat-bubble--model {
-  background: #1c1c1f;
-  color: #e8e8ec;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-bottom-left-radius: 6px;
-}
-
-@keyframes chat-bubble-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-/* Thinking indicator */
-
-.chat-bubble--thinking {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 14px 18px;
-  color: #6b6b73;
-  font-size: 12px;
-}
-
-.chat-thinking-dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #6b6b73;
-  animation: chat-thinking-pulse 1.4s ease-in-out infinite;
-}
-.chat-thinking-dot:nth-child(2) { animation-delay: 0.2s; }
-.chat-thinking-dot:nth-child(3) { animation-delay: 0.4s; }
-
-.chat-thinking-label {
-  margin-left: 8px;
-  font-style: italic;
-  letter-spacing: 0;
-}
-
-@keyframes chat-thinking-pulse {
-  0%, 80%, 100% { opacity: 0.3; transform: scale(0.85); }
-  40%           { opacity: 1; transform: scale(1); }
-}
-
-/* Suggestions — appear after the model's first reply */
-
-.chat-suggestions {
-  max-width: 720px;
-  width: 100%;
-  margin: 8px auto 16px;
-  padding: 0 24px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.chat-suggestion {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #b8b8c0;
-  font-size: 13px;
-  letter-spacing: -0.003em;
-  padding: 8px 14px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-  font-family: inherit;
-}
-
-.chat-suggestion:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: #f5f5f7;
-}
-
-/* Composer */
-
-.chat-composer {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 16px 24px 24px;
-  max-width: 720px;
-  width: 100%;
-  margin: 0 auto;
-  flex-shrink: 0;
-}
-
-.chat-composer-input {
-  flex: 1;
-  resize: none;
-  background: #1c1c1f;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #f5f5f7;
-  font-family: inherit;
-  font-size: 15px;
-  line-height: 1.45;
-  letter-spacing: -0.005em;
-  padding: 12px 16px;
-  border-radius: 18px;
-  outline: none;
-  min-height: 44px;
-  max-height: 180px;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.chat-composer-input::placeholder {
-  color: #4a4a52;
-}
-
-.chat-composer-input:focus {
-  border-color: rgba(255, 255, 255, 0.2);
-  background: #232327;
-}
-
-.chat-composer-input:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.chat-composer-send {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  background: #2c7cf0;
-  color: #ffffff;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  transition: background 0.15s, transform 0.15s, opacity 0.15s;
-  flex-shrink: 0;
-}
-
-.chat-composer-send:hover:not(:disabled) {
-  background: #1f6ce0;
-  transform: scale(1.05);
-}
-
-.chat-composer-send:disabled {
-  background: #2a2a2e;
-  color: #4a4a52;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.chat-error {
-  max-width: 720px;
-  margin: 8px auto;
-  padding: 12px 16px;
-  background: rgba(220, 38, 38, 0.1);
-  border: 1px solid rgba(220, 38, 38, 0.3);
-  color: #f87171;
-  border-radius: 10px;
-  font-size: 13px;
-}
-
-/* Tool-call indicator — appears inline in the model column when the model
-   used a tool. Small, dim, leftward — so it reads as activity, not as the
-   main message. */
-
-.chat-tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  font-size: 12px;
-  color: #6b6b73;
-  font-family: var(--font-mono);
-  letter-spacing: -0.005em;
-  animation: chat-bubble-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.chat-tool-icon {
-  display: inline-flex;
-  width: 16px;
-  height: 16px;
-  align-items: center;
-  justify-content: center;
-  color: #4a4a52;
-}
-
-.chat-tool-name {
-  color: #b8b8c0;
-  font-weight: 500;
-}
-
-.chat-tool-input {
-  color: #6b6b73;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-tool-state {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #6b6b73;
-}
-
-.chat-tool-state--output-available {
-  background: rgba(76, 175, 80, 0.12);
-  color: #6cc46f;
-}
-
-.chat-tool-state--input-streaming,
-.chat-tool-state--input-available {
-  background: rgba(255, 193, 7, 0.12);
-  color: #d4ad3a;
-}
-
-.chat-tool-state--output-error {
-  background: rgba(220, 38, 38, 0.12);
-  color: #ef4444;
-}
-
-
-/* =========================================================================
-   PMC app screens — shared helpers
-   =========================================================================
-   Foundation for the eval / first-meeting / chat trio. Names match the
-   design handoff's references (.pmc-anim-fade, .pmc-mark-dot etc.) so the
-   three component files drop in unchanged.
+   Append this to the project's existing web/app/globals.css (after the
+   landing-page additions). All animations are gated behind
+   `prefers-reduced-motion: no-preference` — users with reduced motion
+   preferences see final states immediately, no animation.
    ========================================================================= */
 
 @media (prefers-reduced-motion: no-preference) {
 
+  /* -----------------------------------------------------------------------
+     Universal helpers (shared across screens)
+     ----------------------------------------------------------------------- */
+
   @keyframes pmc-app-simple-fade {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+    to { opacity: 1; }
   }
 
   @keyframes pmc-app-fade-up {
@@ -654,22 +329,44 @@ body {
     to   { opacity: 1; transform: translateY(0); }
   }
 
-  /* Continuous heartbeat for the brand mark's red dot. The "forever 2.6s
-     pulse" referenced in the first-meeting choreography. */
-  @keyframes pmc-dot-pulse {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50%      { transform: scale(1.15); opacity: 0.85; }
+  @keyframes pmc-app-letter-arrive {
+    to { opacity: 1; transform: translateY(0); }
   }
 
+  /* Used everywhere for simple opacity entries; pair with inline
+     animation-delay to choreograph cascades. */
   .pmc-anim-fade {
     opacity: 0;
-    animation: pmc-app-simple-fade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: pmc-app-simple-fade 0.5s ease forwards;
   }
 
   .pmc-anim-fade-up {
     opacity: 0;
     transform: translateY(6px);
-    animation: pmc-app-fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: pmc-app-fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  /* Letter-cascade primitive used by <LetterCascade>. The per-letter
+     animation-delay is set inline via the component. */
+  .pmc-letter {
+    display: inline-block;
+    opacity: 0;
+    transform: translateY(4px);
+    animation: pmc-app-letter-arrive 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+
+  /* -----------------------------------------------------------------------
+     Brand mark — the red-dot heartbeat
+     -----------------------------------------------------------------------
+     The dot lives in the center of the mark and pulses on a 2.6s cycle.
+     This is the visual signature that the user's model is "alive" — it
+     appears on every in-app screen from the download page forward.
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-dot-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.45; }
   }
 
   .pmc-mark-dot {
@@ -678,26 +375,133 @@ body {
     animation: pmc-dot-pulse 2.6s ease-in-out infinite;
   }
 
-  /* Letter-cascade keyframe used by <LetterCascade>. */
-  @keyframes pmc-letter-arrive {
-    to { opacity: 1; transform: translateY(0); }
+
+  /* -----------------------------------------------------------------------
+     Download page (web)
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-mark-scale-in {
+    from { opacity: 0; transform: scale(0.92); }
+    to   { opacity: 1; transform: scale(1); }
   }
 
-  .pmc-letter {
-    display: inline-block;
+  @keyframes pmc-dot-appear {
+    0%   { opacity: 0; transform: scale(0); }
+    60%  { opacity: 1; transform: scale(1.3); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  .pmc-dl-mark {
     opacity: 0;
-    transform: translateY(4px);
-    animation: pmc-letter-arrive 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-    /* animation-delay is set inline per-letter by <LetterCascade> */
+    transform-origin: center;
+    transform-box: fill-box;
+    animation: pmc-mark-scale-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards;
+  }
+
+  .pmc-dl-dot {
+    opacity: 0;
+    transform-origin: center;
+    transform-box: fill-box;
+    animation:
+      pmc-dot-appear 0.5s cubic-bezier(0.16, 1, 0.3, 1) 1.2s forwards,
+      pmc-dot-pulse 2.6s ease-in-out 2.0s infinite;
+  }
+
+
+  /* -----------------------------------------------------------------------
+     First-launch screen (Mac app)
+     -----------------------------------------------------------------------
+     IMPORTANT: the long pause between "Hello." (2.8s) and the second line
+     (5.5s) is deliberate. Three seconds of held silence. Do not shorten.
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-hello-arrive {
+    from { opacity: 0; transform: scale(0.96); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  .pmc-fl-mark {
+    opacity: 0;
+    transform-origin: center;
+    transform-box: fill-box;
+    animation: pmc-mark-scale-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.6s forwards;
+  }
+
+  .pmc-fl-dot {
+    opacity: 0;
+    transform-origin: center;
+    transform-box: fill-box;
+    animation:
+      pmc-dot-appear 0.5s cubic-bezier(0.16, 1, 0.3, 1) 1.7s forwards,
+      pmc-dot-pulse 2.6s ease-in-out 2.5s infinite;
+  }
+
+  .pmc-fl-hello {
+    opacity: 0;
+    transform: scale(0.96);
+    animation: pmc-hello-arrive 0.7s cubic-bezier(0.16, 1, 0.3, 1) 2.8s forwards;
+  }
+
+
+  /* -----------------------------------------------------------------------
+     Train screen — loss curve
+     -----------------------------------------------------------------------
+     The loss curve draws itself in via stroke-dashoffset on first mount.
+     For subsequent updates as new datapoints arrive, the path simply
+     re-renders without animation. If you want the dramatic draw-in to
+     only happen on first paint, attach a `key` derived from a
+     "has-rendered-once" boolean rather than series.length.
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-loss-draw {
+    to { stroke-dashoffset: 0; }
+  }
+
+  .pmc-loss-path {
+    stroke-dasharray: 600;
+    stroke-dashoffset: 600;
+    animation: pmc-loss-draw 6.0s cubic-bezier(0.22, 1, 0.36, 1) 0.8s forwards;
+  }
+
+  .pmc-loss-grid {
+    stroke: rgba(29, 29, 31, 0.06);
+    stroke-width: 0.5;
   }
 }
 
+
+/* =========================================================================
+   Reduced motion: ensure the loss-grid is still styled even when the
+   animation gate above is off, and the mark dot is visible (just not
+   pulsing). These rules live outside the @media block so they always
+   apply.
+   ========================================================================= */
+
+.pmc-loss-grid {
+  stroke: rgba(29, 29, 31, 0.06);
+  stroke-width: 0.5;
+}
+
+.pmc-loss-path {
+  /* Default visible state for reduced motion */
+}
+
+.pmc-mark-dot,
+.pmc-dl-dot,
+.pmc-fl-dot {
+  /* Without animation gate, these are visible static red dots. */
+  fill: #FF3B30;
+}
 
 /* =========================================================================
    PMC Eval + First Meeting + Chat — additions to globals.css
    =========================================================================
    Append after the app-screens additions. All animations gated behind
    `prefers-reduced-motion: no-preference`.
+
+   Assumes the shared helpers from the app-screens additions are already
+   present: .pmc-anim-fade, .pmc-anim-fade-up, .pmc-mark-dot, and the
+   keyframes pmc-app-simple-fade / pmc-app-fade-up / pmc-dot-pulse.
    ========================================================================= */
 
 @media (prefers-reduced-motion: no-preference) {
@@ -737,12 +541,14 @@ body {
     to   { opacity: 1; transform: translateY(0); }
   }
 
+  /* The mark itself — swirls in (scale + rotate) */
   .pmc-fm-ring {
     transform-origin: center;
     transform-box: fill-box;
     animation: pmc-fm-swirl-in 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.3s backwards;
   }
 
+  /* The expanding ring — fires once, dissipates */
   .pmc-fm-ring-pulse {
     transform-origin: center;
     transform-box: fill-box;
@@ -750,6 +556,7 @@ body {
     animation: pmc-fm-ring-expand 1.2s ease-out 1.3s forwards;
   }
 
+  /* The heartbeat — blooms with overshoot, then pulses forever */
   .pmc-fm-dot {
     transform-origin: center;
     transform-box: fill-box;
@@ -759,11 +566,13 @@ body {
       pmc-dot-pulse 2.6s ease-in-out 2.2s infinite;
   }
 
+  /* The first line — arrives after the mark settles */
   .pmc-fm-line {
     opacity: 0;
     animation: pmc-fm-line-arrive 0.7s cubic-bezier(0.16, 1, 0.3, 1) 2.4s forwards;
   }
 
+  /* The composer — rises from the bottom last */
   .pmc-fm-composer {
     opacity: 0;
     animation: pmc-fm-composer-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) 4.2s forwards;
@@ -772,6 +581,14 @@ body {
 
   /* -----------------------------------------------------------------------
      Eval → First Meeting transition (the swirl-out)
+     -----------------------------------------------------------------------
+     When the eval's final round is judged, the eval UI should fade and fall
+     away as the first-meeting arrives. Apply .pmc-eval-exit to the eval
+     container to play the exit, then mount the FirstMeeting component.
+
+     In React, the cleanest implementation is a brief overlap: render both,
+     with the eval fading out (this class) while FirstMeeting fades/swirls
+     in (its own classes above). ~600ms overlap.
      ----------------------------------------------------------------------- */
 
   @keyframes pmc-eval-exit {
@@ -787,6 +604,9 @@ body {
 
 /* =========================================================================
    Reduced-motion fallbacks (outside the gate — always apply)
+   =========================================================================
+   Users with reduced motion see the final, settled state instantly: mark
+   present and upright, dot visible (not pulsing), line and composer shown.
    ========================================================================= */
 
 @media (prefers-reduced-motion: reduce) {
@@ -798,232 +618,6 @@ body {
     transform: none !important;
   }
   .pmc-fm-ring-pulse {
-    opacity: 0 !important;
+    opacity: 0 !important; /* the one-shot ring simply doesn't appear */
   }
-}
-
-
-/* =========================================================================
-   Train (Act 3) — live training progress
-   =========================================================================
-   Calm, dark, honest. Four stages light up in order. An activity feed below
-   shows every event from the backend as it happens. "You can close this"
-   reassurance front-and-center.
-   ========================================================================= */
-
-.train-root {
-  min-height: 100vh;
-  background: #0a0a0c;
-  color: #f5f5f7;
-  font-family: var(--font-sans);
-  display: flex;
-  flex-direction: column;
-}
-
-.train-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 32px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  flex-shrink: 0;
-}
-
-.train-brand {
-  font-size: 13px;
-  font-weight: 500;
-  color: #8a8a92;
-  text-decoration: none;
-  letter-spacing: -0.005em;
-}
-
-.train-brand:hover {
-  color: #f5f5f7;
-}
-
-.train-elapsed {
-  font-size: 13px;
-  color: #6b6b73;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
-}
-
-.train-stage-section {
-  padding: 64px 32px 32px;
-  max-width: 640px;
-  width: 100%;
-  margin: 0 auto;
-}
-
-.train-stage-section--empty {
-  text-align: center;
-}
-
-.train-title {
-  font-size: clamp(28px, 4vw, 40px);
-  line-height: 1.1;
-  font-weight: 500;
-  letter-spacing: -0.025em;
-  margin: 0 0 12px;
-}
-
-.train-subtitle {
-  font-size: 15px;
-  line-height: 1.55;
-  color: #8a8a92;
-  margin: 0 0 40px;
-  max-width: 48ch;
-}
-
-.train-inline-link {
-  color: #f5f5f7;
-  text-decoration: underline;
-  text-decoration-color: rgba(255, 255, 255, 0.3);
-}
-
-.train-stages {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.train-stage {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.train-stage-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #2a2a2e;
-  flex-shrink: 0;
-  transition: background 0.4s ease;
-}
-
-.train-stage--current .train-stage-dot {
-  background: #2c7cf0;
-  box-shadow: 0 0 0 4px rgba(44, 124, 240, 0.15);
-  animation: train-dot-pulse 1.4s ease-in-out infinite;
-}
-
-.train-stage--done .train-stage-dot {
-  background: #6cc46f;
-}
-
-@keyframes train-dot-pulse {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(44, 124, 240, 0.10); }
-  50%      { box-shadow: 0 0 0 8px rgba(44, 124, 240, 0.20); }
-}
-
-.train-stage-label {
-  font-size: 15px;
-  color: #b8b8c0;
-  flex: 1;
-  transition: color 0.3s ease;
-}
-
-.train-stage--current .train-stage-label {
-  color: #f5f5f7;
-  font-weight: 500;
-}
-
-.train-stage--done .train-stage-label {
-  color: #8a8a92;
-}
-
-.train-stage-spinner {
-  display: inline-flex;
-  gap: 3px;
-}
-
-.train-stage-spinner span {
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #6b6b73;
-  animation: chat-thinking-pulse 1.4s ease-in-out infinite;
-}
-
-.train-stage-spinner span:nth-child(2) { animation-delay: 0.2s; }
-.train-stage-spinner span:nth-child(3) { animation-delay: 0.4s; }
-
-/* Activity feed — small, monospace, dim. Reads as event log, not as the
-   primary content. */
-
-.train-activity {
-  padding: 16px 32px 64px;
-  max-width: 640px;
-  width: 100%;
-  margin: 0 auto;
-  flex: 1;
-}
-
-.train-activity-title {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: #6b6b73;
-  margin: 0 0 16px;
-  font-weight: 500;
-}
-
-.train-activity-empty {
-  font-size: 13px;
-  color: #4a4a52;
-  font-style: italic;
-  margin: 0;
-}
-
-.train-activity-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.train-activity-item {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 6px 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  color: #8a8a92;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-  animation: chat-bubble-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.train-activity-tag {
-  display: inline-block;
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.05);
-  color: #6b6b73;
-  flex-shrink: 0;
-  font-family: var(--font-sans);
-}
-
-.train-activity-tag--curate { background: rgba(168, 85, 247, 0.12); color: #c084fc; }
-.train-activity-tag--train  { background: rgba(44, 124, 240, 0.12); color: #60a5fa; }
-.train-activity-tag--eval   { background: rgba(245, 158, 11, 0.12); color: #fbbf24; }
-.train-activity-tag--publish{ background: rgba(76, 175, 80, 0.12); color: #6cc46f; }
-
-.train-activity-text {
-  flex: 1;
-  word-break: break-word;
 }
