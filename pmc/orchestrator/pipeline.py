@@ -544,8 +544,32 @@ def _default_train_fn(
     output_dir: Path,
     eval_completions: list[Completion] | None,
 ) -> SFTRunResult:
+    """Pick the best trainer available on this host.
+
+    Preference order:
+      1. `PMC_TRAINER=mlx` env override (forces MLX even if MPS unavailable)
+      2. MLX-LM on Apple Silicon — fastest local path, our default for V0
+      3. PyTorch + TRL + PEFT (HF stack) — requires torch installed,
+         works on any GPU including remote
+    """
+    import os
+    forced = os.environ.get("PMC_TRAINER", "").strip().lower()
+
+    if forced == "mlx" or _mlx_available():
+        from pmc.train.mlx_trainer import mlx_train_fn
+        return mlx_train_fn(config, train, output_dir, eval_completions)
+
     from pmc.train.sft import run_sft
     return run_sft(config, train, output_dir, eval_completions)
+
+
+def _mlx_available() -> bool:
+    try:
+        import mlx_lm  # noqa: F401
+        import mlx.core  # noqa: F401
+        return True
+    except ImportError:
+        return False
 
 
 def _default_generator_factory(base_model: str, adapter_dir: Path | None) -> ModelGenerator:

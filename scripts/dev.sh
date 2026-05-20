@@ -73,16 +73,43 @@ trap cleanup EXIT INT TERM
 # --- 1. Start backend on :8000 ---
 echo "→ Starting Python backend on :8000..."
 PMC_DEV_ROOT="$PMC_DEV_ROOT" \
-uv run --extra dev --extra ingest --extra serve python -c "
+uv run python -c "
 import os
 from pmc.serve.api import run
 from pmc.serve.server import PMCServer
 from pmc.serve.registry import AdapterRegistry
-from pmc.serve.engine import MockEngine
+
+# Prefer MLX (Apple Silicon, local GPU) when installed. Falls back to the
+# deterministic MockEngine so the stack still boots on machines without MLX.
+try:
+    from pmc.serve.engine_mlx import MLXEngine, DEFAULT_MLX_BASE
+    engine = MLXEngine(base_model=DEFAULT_MLX_BASE)
+    print(f'[serve] engine=MLXEngine base={DEFAULT_MLX_BASE}', flush=True)
+except Exception as e:
+    from pmc.serve.engine import MockEngine
+    engine = MockEngine(base_model='mock/base')
+    print(f'[serve] engine=MockEngine (mlx unavailable: {e})', flush=True)
+
+# Wire memory + identity into chat if OPENAI_API_KEY is set (for embeddings).
+memory_provider = None
+if os.environ.get('OPENAI_API_KEY'):
+    try:
+        from pmc.serve.memory_context import MemoryContextProvider
+        from pmc.memory.embeddings import OpenAIEmbeddings
+        from pmc.storage.paths import StoragePaths
+        memory_provider = MemoryContextProvider(
+            paths=StoragePaths(os.path.join(os.environ['PMC_DEV_ROOT'], 'storage')),
+            embeddings=OpenAIEmbeddings(),
+        )
+        print('[serve] memory_provider=enabled (OpenAI embeddings)', flush=True)
+    except Exception as e:
+        print(f'[serve] memory_provider=disabled ({e})', flush=True)
+else:
+    print('[serve] memory_provider=disabled (set OPENAI_API_KEY to enable recall)', flush=True)
 
 root = os.environ['PMC_DEV_ROOT']
 registry = AdapterRegistry(os.path.join(root, 'registry'))
-server = PMCServer(registry, MockEngine(base_model='mock/base'))
+server = PMCServer(registry, engine, memory_provider=memory_provider)
 run(
     server,
     storage_root=os.path.join(root, 'storage'),

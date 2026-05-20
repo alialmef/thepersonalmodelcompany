@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Brand } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { SourceRow } from "@/components/source-row";
@@ -9,6 +10,11 @@ import { NativeSourceRow } from "@/components/native-source-row";
 import { ItemsCounter } from "@/components/items-counter";
 import { DEMO_USER_ID } from "@/lib/demo-user";
 import { isTauri } from "@/lib/runtime";
+
+const PMC_API_URL =
+  process.env.NEXT_PUBLIC_PMC_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8000";
 
 /**
  * Act 2 — Gather.
@@ -19,14 +25,51 @@ import { isTauri } from "@/lib/runtime";
  * that something is happening on their side, not ours.
  */
 export default function ConnectPage() {
+  const router = useRouter();
   const [refreshKey, setRefreshKey] = useState(0);
   const [inApp, setInApp] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const userId = DEMO_USER_ID;
   const refresh = () => setRefreshKey((k) => k + 1);
 
   useEffect(() => {
     setInApp(isTauri());
   }, []);
+
+  async function startTraining() {
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/runs`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            // Skip eval for V0 (eval requires HF/PEFT not installed locally).
+            // KEEP deploy=true so the trained adapter gets registered + chat
+            // can actually find it. skip_eval+!skip_deploy → force-deploy path.
+            skip_eval: true,
+            skip_deploy: false,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const detail = await res.text();
+        throw new Error(`HTTP ${res.status}: ${detail}`);
+      }
+      const data = (await res.json()) as { job_id: string };
+      router.push(`/train?job=${encodeURIComponent(data.job_id)}&user=${encodeURIComponent(userId)}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(
+        `Couldn't start training: ${msg}. Make sure the backend is running (./scripts/dev.sh).`,
+      );
+      setSubmitting(false);
+    }
+  }
 
   return (
     <main className="min-h-screen flex flex-col">
@@ -133,6 +176,12 @@ export default function ConnectPage() {
           </p>
         </div>
 
+        {error && (
+          <div className="mb-6 p-4 rounded-lg border border-red-500/30 bg-red-500/5 text-[13px] text-red-700">
+            {error}
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <Link
             href="/"
@@ -140,9 +189,9 @@ export default function ConnectPage() {
           >
             ← Back
           </Link>
-          <Link href="/curate">
-            <Button>Continue</Button>
-          </Link>
+          <Button onClick={startTraining} disabled={submitting}>
+            {submitting ? "Starting…" : "Train my model"}
+          </Button>
         </div>
       </section>
     </main>
