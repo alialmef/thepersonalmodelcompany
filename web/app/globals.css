@@ -66,6 +66,16 @@ body {
   font-feature-settings: "ss01", "cv02", "cv11";
 }
 
+/* The whole product runs in light mode (per design brief: "Light background
+   throughout the app; the dark hero belongs to the marketing site only").
+   Without this, macOS dark-mode users see our token-driven body bg flip to
+   #000000 — and since the designed screens use a narrow centered white
+   column, the area around it would render black. */
+html {
+  color-scheme: light;
+  background: #FFFFFF;
+}
+
 ::selection {
   background: var(--color-foreground);
   color: var(--color-background);
