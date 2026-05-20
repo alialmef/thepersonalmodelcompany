@@ -14,12 +14,28 @@ export const metadata: Metadata = {
       "Train an AI model on your own writing. You own it. Host it. Take it anywhere.",
     type: "website",
     siteName: "The Personal Model Company",
+    images: [
+      {
+        url: "/icon-1024.png",
+        width: 1024,
+        height: 1024,
+        alt: "The Personal Model Company",
+      },
+    ],
   },
   twitter: {
-    card: "summary_large_image",
+    card: "summary",
     title: "The Personal Model Company",
     description:
       "Train an AI model on your own writing. You own it. Host it. Take it anywhere.",
+    images: ["/icon-1024.png"],
+  },
+  icons: {
+    icon: [
+      { url: "/icon.png", sizes: "256x256", type: "image/png" },
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: "/icon.png",
   },
 };
 

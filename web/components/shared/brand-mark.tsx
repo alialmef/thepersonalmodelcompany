@@ -1,13 +1,19 @@
 /**
- * The PMC brand mark — a thin circle with a red dot at center.
+ * The PMC brand mark — circle + red center dot, matching the app icon.
+ *
+ * Proportions taken directly from design/icon/app-icon-1024-bold.svg:
+ *   - viewBox 1024x1024
+ *   - circle r=270, stroke=20 (≈1.95% of viewBox)
+ *   - dot r=42
  *
  * Used everywhere from the 92px ceremonial mark at first-meeting down to
  * the 16px inline mark on chat bubbles. The dot's pulse animation is
  * defined in globals.css (`.pmc-mark-dot` → `pmc-dot-pulse` keyframes),
  * not here — the static SVG just renders the geometry.
  *
- * Stroke width scales mildly with size so small versions don't disappear
- * and large versions don't look chunky.
+ * Note: this is the transparent in-UI variant — no white rounded-square
+ * background. That backing is reserved for the app-icon treatment in
+ * the Dock / Finder / favicon (web/public/icon.svg).
  */
 export function BrandMark({
   size = 24,
@@ -20,32 +26,26 @@ export function BrandMark({
   pulsing?: boolean;
   className?: string;
 }) {
-  // Scale stroke + dot relative to size so a 16px mark and a 92px mark
-  // both read as "thin ring + small red center".
-  const stroke = Math.max(0.5, size * 0.012);
-  const dotR = Math.max(1.5, size * 0.07);
-
   return (
     <svg
-      viewBox="0 0 120 120"
+      viewBox="0 0 1024 1024"
       width={size}
       height={size}
       aria-hidden="true"
       className={className}
     >
       <circle
-        cx="60"
-        cy="60"
-        r="44"
+        cx="512"
+        cy="512"
+        r="270"
         fill="none"
         stroke="#1D1D1F"
-        strokeWidth={stroke * (120 / size)}
-        vectorEffect="non-scaling-stroke"
+        strokeWidth="20"
       />
       <circle
-        cx="60"
-        cy="60"
-        r={dotR * (120 / size)}
+        cx="512"
+        cy="512"
+        r="42"
         fill="#FF3B30"
         className={pulsing ? "pmc-mark-dot" : undefined}
       />

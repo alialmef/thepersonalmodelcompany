@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>The Personal Model Company</title>
+
+  <!-- Soft white rounded square (Apple superellipse-ish corner) -->
+  <rect x="0" y="0" width="1024" height="1024" rx="232" ry="232" fill="#FFFFFF"/>
+
+  <!-- The mark: bold circle so it reads at dock size -->
+  <circle cx="512" cy="512" r="270" fill="none" stroke="#1D1D1F" stroke-width="20"/>
+
+  <!-- The heartbeat: red dot, sized to register at small scale -->
+  <circle cx="512" cy="512" r="42" fill="#FF3B30"/>
+</svg>
