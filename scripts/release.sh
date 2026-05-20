@@ -28,6 +28,10 @@
 
 set -euo pipefail
 
+# Ensure cargo + rustc are on PATH even when invoked from minimal shells
+# (e.g. cron, CI, agent harness). Rustup installs to ~/.cargo/bin by default.
+export PATH="$HOME/.cargo/bin:$PATH"
+
 # ----- config ----------------------------------------------------------------
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DESKTOP_DIR="$REPO_ROOT/desktop"

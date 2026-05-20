@@ -18,6 +18,7 @@ from pathlib import Path
 
 from pmc.serve.engine import InferenceEngine, MockEngine
 from pmc.serve.export import export_adapter_only, export_bundle
+from pmc.serve.memory_context import MemoryContextProvider, enrich_messages
 from pmc.serve.registry import AdapterRegistry
 from pmc.serve.schema import (
     ChatCompletionChoice,
@@ -34,15 +35,45 @@ from pmc.serve.schema import (
 
 
 class PMCServer:
-    """High-level server: registry + engine + API methods."""
+    """High-level server: registry + engine + API methods.
+
+    Pass `memory_provider` to enable identity-prompt + retrieved-context
+    injection on every chat. When omitted, chat() behaves exactly as it did
+    before memory existed — useful for tests and for engines that don't
+    benefit from RAG.
+    """
 
     def __init__(
         self,
         registry: AdapterRegistry,
         engine: InferenceEngine | None = None,
+        memory_provider: MemoryContextProvider | None = None,
+        retrieval_k: int = 5,
     ) -> None:
         self.registry = registry
         self.engine: InferenceEngine = engine or MockEngine()
+        self.memory_provider = memory_provider
+        self.retrieval_k = retrieval_k
+
+    def _prepared_messages(
+        self,
+        user_id: str,
+        messages: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        """Enrich messages with identity + retrieved memory when configured."""
+        if self.memory_provider is None:
+            return messages
+        try:
+            context = self.memory_provider.get(user_id)
+        except Exception:
+            # Memory is opportunistic — never block a chat because the store
+            # is missing or corrupt. Just serve the raw messages.
+            return messages
+        return enrich_messages(
+            messages,
+            context,
+            retrieval_k=self.retrieval_k,
+        )
 
     # -- chat completions --------------------------------------------------
 
@@ -60,6 +91,7 @@ class PMCServer:
 
         stop = [request.stop] if isinstance(request.stop, str) else request.stop
         messages = [m.model_dump() for m in request.messages]
+        messages = self._prepared_messages(user_id, messages)
 
         text, usage = self.engine.chat(
             record=record,
@@ -98,6 +130,7 @@ class PMCServer:
             )
         stop = [request.stop] if isinstance(request.stop, str) else request.stop
         messages = [m.model_dump() for m in request.messages]
+        messages = self._prepared_messages(user_id, messages)
 
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
 
