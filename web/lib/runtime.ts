@@ -89,6 +89,48 @@ export async function ingestIMessage(
 }
 
 /**
+ * Apple Mail status (.emlx walker for the user's Sent folder).
+ * Shape mirrors IMessageStatus so the JS bridge stays uniform.
+ */
+export type MailStatus = IMessageStatus;
+
+export async function mailStatus(): Promise<MailStatus> {
+  if (!isTauri()) throw new Error("mailStatus() requires the Tauri runtime");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<MailStatus>("mail_status");
+}
+
+export async function ingestMail(
+  userId: string,
+  limit?: number,
+): Promise<IngestSummary> {
+  if (!isTauri()) throw new Error("ingestMail() requires the Tauri runtime");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<IngestSummary>("ingest_mail", { userId, limit });
+}
+
+/**
+ * Notes / text-file walker — scans ~/Documents, ~/Desktop, ~/Notes for
+ * .txt / .md / .markdown / .mdx / .rtf files.
+ */
+export type NotesStatus = IMessageStatus;
+
+export async function notesStatus(): Promise<NotesStatus> {
+  if (!isTauri()) throw new Error("notesStatus() requires the Tauri runtime");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<NotesStatus>("notes_status");
+}
+
+export async function ingestNotes(
+  userId: string,
+  limit?: number,
+): Promise<IngestSummary> {
+  if (!isTauri()) throw new Error("ingestNotes() requires the Tauri runtime");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<IngestSummary>("ingest_notes", { userId, limit });
+}
+
+/**
  * Map of source kinds → Tauri command bindings for native ingestion. The
  * Connect page uses this to decide whether to render the native flow or the
  * upload fallback for each row.
@@ -111,5 +153,23 @@ export const NATIVE_INGEST: Partial<
       return ingestIMessage(userId);
     },
   },
-  // notes, email_mbox, whatsapp will be added as their Rust modules ship
+  email_mbox: {
+    async status() {
+      const s = await mailStatus();
+      return { canRead: s.can_read, count: s.message_count, error: s.error };
+    },
+    async ingest(userId: string) {
+      return ingestMail(userId);
+    },
+  },
+  text: {
+    async status() {
+      const s = await notesStatus();
+      return { canRead: s.can_read, count: s.message_count, error: s.error };
+    },
+    async ingest(userId: string) {
+      return ingestNotes(userId);
+    },
+  },
+  // whatsapp will be added as its Rust module ships
 };

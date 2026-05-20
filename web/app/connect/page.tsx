@@ -91,20 +91,6 @@ export default function ConnectPage() {
         </div>
 
         <div>
-          <SourceRow
-            label="Apple Mail / Outlook"
-            description="Upload .mbox"
-            kind="email_mbox"
-            accept=".mbox,application/mbox"
-            userId={userId}
-            onChange={refresh}
-            identityPrompt={{
-              label: "Your email addresses (comma-separated)",
-              placeholder: "you@example.com",
-              field: "userEmails",
-            }}
-          />
-
           {inApp ? (
             <NativeSourceRow
               label="iMessage"
@@ -127,6 +113,47 @@ export default function ConnectPage() {
             />
           )}
 
+          {inApp ? (
+            <NativeSourceRow
+              label="Mail (Sent)"
+              kind="email_mbox"
+              userId={userId}
+              onChange={refresh}
+            />
+          ) : (
+            <SourceRow
+              label="Apple Mail / Outlook"
+              description="Upload .mbox"
+              kind="email_mbox"
+              accept=".mbox,application/mbox"
+              userId={userId}
+              onChange={refresh}
+              identityPrompt={{
+                label: "Your email addresses (comma-separated)",
+                placeholder: "you@example.com",
+                field: "userEmails",
+              }}
+            />
+          )}
+
+          {inApp ? (
+            <NativeSourceRow
+              label="Notes & writing"
+              kind="text"
+              userId={userId}
+              onChange={refresh}
+            />
+          ) : (
+            <SourceRow
+              label="Notes"
+              description="Upload .md or .txt"
+              kind="text"
+              accept=".md,.txt,.markdown,text/plain,text/markdown"
+              userId={userId}
+              onChange={refresh}
+            />
+          )}
+
           <SourceRow
             label="WhatsApp"
             description="Upload chat .txt"
@@ -139,15 +166,6 @@ export default function ConnectPage() {
               placeholder: "Alex",
               field: "userNames",
             }}
-          />
-
-          <SourceRow
-            label="Notes"
-            description="Upload .md or .txt"
-            kind="text"
-            accept=".md,.txt,.markdown,text/plain,text/markdown"
-            userId={userId}
-            onChange={refresh}
           />
 
           <SourceRow

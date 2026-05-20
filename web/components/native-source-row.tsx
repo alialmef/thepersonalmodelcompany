@@ -23,6 +23,12 @@ export interface NativeSourceRowProps {
   kind: string; // matches a key in NATIVE_INGEST
   userId: string;
   onChange?: (count: number) => void;
+  /**
+   * When true (default), the row checks for permissions on mount and
+   * auto-ingests if it can read the source. The user only sees a click
+   * surface when something blocks (permission denied, not found, error).
+   */
+  autoStart?: boolean;
 }
 
 /**
@@ -37,16 +43,42 @@ export function NativeSourceRow({
   kind,
   userId,
   onChange,
+  autoStart = true,
 }: NativeSourceRowProps) {
   const [tauriReady, setTauriReady] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [messageCount, setMessageCount] = useState<number | null>(null);
   const [ingestedCount, setIngestedCount] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
+  const [autoStarted, setAutoStarted] = useState(false);
 
   useEffect(() => {
     setTauriReady(isTauri());
   }, []);
+
+  // Auto-check on mount (only inside the Tauri app). If the source is
+  // ready, immediately auto-ingest. The user sees nothing to click unless
+  // something genuinely blocks (denied / not found / error).
+  useEffect(() => {
+    if (!autoStart || !tauriReady || autoStarted) return;
+    setAutoStarted(true);
+    void autoFlow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tauriReady, autoStart]);
+
+  async function autoFlow() {
+    await check();
+    // `check` mutated `status` — read latest via state? No: just re-call
+    // binding.status synchronously and decide here.
+    try {
+      const result = await binding!.status();
+      if (result.canRead && !result.error) {
+        await ingest();
+      }
+    } catch {
+      // status() failure already surfaced in check()
+    }
+  }
 
   const binding = NATIVE_INGEST[kind];
   if (!binding) {

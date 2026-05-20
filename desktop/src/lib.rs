@@ -10,6 +10,8 @@ use serde::Serialize;
 
 use crate::ingest::{
     imessage,
+    mail,
+    notes,
     IngestError, IngestSummary, RawItemJson,
 };
 
@@ -179,6 +181,148 @@ async fn ingest_imessage(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Mail ingestion (Apple Mail .emlx walker — sent folders only)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct MailStatus {
+    chat_db_exists: bool,
+    can_read: bool,
+    message_count: Option<i64>,
+    error: Option<String>,
+}
+
+/// Pre-flight check for Apple Mail. Returns the same shape as iMessage so
+/// the JS bridge can use a single status type for all native sources.
+#[tauri::command]
+fn mail_status() -> MailStatus {
+    let s = mail::status();
+    MailStatus {
+        chat_db_exists: s.exists,
+        can_read: s.can_read,
+        message_count: s.message_count,
+        error: s.error,
+    }
+}
+
+#[tauri::command]
+async fn ingest_mail(
+    user_id: String,
+    limit: Option<usize>,
+) -> Result<IngestSummary, IngestError> {
+    let items = tokio::task::spawn_blocking(move || -> Result<Vec<RawItemJson>, IngestError> {
+        mail::read_sent_mail(limit)
+    })
+    .await
+    .map_err(|e| IngestError::Internal(format!("task join: {e}")))??;
+
+    let count = items.len();
+    if count == 0 {
+        return Ok(IngestSummary {
+            source: "email",
+            source_id: "email-empty".to_string(),
+            items_ingested: 0,
+        });
+    }
+
+    let now = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let source_id = format!("email-{now}");
+    post_items(&user_id, "email_mbox", &source_id, items).await?;
+    Ok(IngestSummary {
+        source: "email",
+        source_id,
+        items_ingested: count,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Notes / personal text files ingestion
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct NotesStatus {
+    chat_db_exists: bool,
+    can_read: bool,
+    message_count: Option<i64>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn notes_status() -> NotesStatus {
+    let s = notes::status();
+    NotesStatus {
+        chat_db_exists: s.exists,
+        can_read: s.can_read,
+        message_count: s.message_count,
+        error: s.error,
+    }
+}
+
+#[tauri::command]
+async fn ingest_notes(
+    user_id: String,
+    limit: Option<usize>,
+) -> Result<IngestSummary, IngestError> {
+    let items = tokio::task::spawn_blocking(move || -> Result<Vec<RawItemJson>, IngestError> {
+        notes::read_notes(limit)
+    })
+    .await
+    .map_err(|e| IngestError::Internal(format!("task join: {e}")))??;
+
+    let count = items.len();
+    if count == 0 {
+        return Ok(IngestSummary {
+            source: "text",
+            source_id: "notes-empty".to_string(),
+            items_ingested: 0,
+        });
+    }
+
+    let now = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let source_id = format!("notes-{now}");
+    post_items(&user_id, "text", &source_id, items).await?;
+    Ok(IngestSummary {
+        source: "text",
+        source_id,
+        items_ingested: count,
+    })
+}
+
+/// Shared POST helper — every native ingester drops items at the same
+/// backend endpoint via the same JSON shape.
+async fn post_items(
+    user_id: &str,
+    kind: &str,
+    source_id: &str,
+    items: Vec<RawItemJson>,
+) -> Result<(), IngestError> {
+    let body = serde_json::json!({
+        "kind": kind,
+        "source_id": source_id,
+        "items": items,
+    });
+    let url = format!(
+        "{}/v1/users/{}/sources/items",
+        backend_url(),
+        urlencoding::encode(user_id),
+    );
+    let response = reqwest::Client::new()
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| IngestError::HttpError(e.to_string()))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(IngestError::HttpError(format!(
+            "backend {status}: {text}"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -190,6 +334,10 @@ pub fn run() {
             imessage_status,
             open_full_disk_access_settings,
             ingest_imessage,
+            mail_status,
+            ingest_mail,
+            notes_status,
+            ingest_notes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
