@@ -123,7 +123,8 @@ function TrainPageInner() {
       if (ev.status === "completed") {
         setDone("ok");
         setDoneSummary("model is ready");
-        setTimeout(() => router.push("/chat"), 1800);
+        // The designed flow goes train → eval → first-meeting → chat.
+        setTimeout(() => router.push(`/eval?user=${encodeURIComponent(userId)}`), 1800);
       } else {
         setDone("fail");
         setDoneSummary(`training ${ev.status ?? "failed"} — see logs`);
