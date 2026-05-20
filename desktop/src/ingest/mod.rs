@@ -5,6 +5,8 @@
 //! backend's `/v1/users/{user_id}/sources/items` endpoint.
 
 pub mod imessage;
+pub mod mail;
+pub mod notes;
 
 use serde::Serialize;
 use std::collections::HashMap;
