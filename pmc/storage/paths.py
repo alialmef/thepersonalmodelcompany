@@ -109,3 +109,21 @@ class StoragePaths:
 
     def tombstones_file(self, user_id: str) -> Path:
         return self.user_root(user_id) / "tombstones.json"
+
+    # -- memory layer (recall) -------------------------------------------
+
+    def memory_dir(self, user_id: str) -> Path:
+        return self.user_root(user_id) / "memory"
+
+    def memory_store_file(self, user_id: str) -> Path:
+        """Per-user SQLite vector store for semantic recall."""
+        return self.memory_dir(user_id) / "store.db"
+
+    def identity_file(self, user_id: str) -> Path:
+        """Per-user IdentityProfile (system-prompt facts for inference)."""
+        return self.user_root(user_id) / "identity.json"
+
+    def runs_ledger_file(self, user_id: str) -> Path:
+        """Append-only ledger of every training run + its eval scalar.
+        Powers the per-user "your model over time" view."""
+        return self.user_root(user_id) / "runs.jsonl"
