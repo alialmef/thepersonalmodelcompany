@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ConnectScreen from "@/components/app/connect-screen";
+import { PermissionsScreen } from "@/components/app/permissions-screen";
 import { useUser } from "@/hooks/use-user";
 import { NATIVE_INGEST, isTauri } from "@/lib/runtime";
 
@@ -33,6 +34,13 @@ const SOURCE_KIND: Record<string, string> = {
  * kicks off the full training pipeline (POST /v1/users/{id}/runs) and
  * routes to /curate?job=<id>.
  */
+// Pretty source labels for the permissions screen headline.
+const SOURCE_LABEL: Record<string, string> = {
+  messages: "your messages",
+  notes: "your notes",
+  mail: "your mail",
+};
+
 export default function ConnectPage() {
   const router = useRouter();
   const { user } = useUser();
@@ -40,6 +48,12 @@ export default function ConnectPage() {
   const [inApp, setInApp] = useState(false);
   const [states, setStates] = useState<Record<string, SourceState>>({});
   const [error, setError] = useState<string | null>(null);
+  // When a source returns permission_denied, surface the full-screen
+  // permission flow instead of an inline message. The kind is the
+  // NATIVE_INGEST key so the screen knows what to re-check.
+  const [permissionFor, setPermissionFor] = useState<
+    { sourceId: string; kind: string } | null
+  >(null);
 
   useEffect(() => {
     setInApp(isTauri());
@@ -144,10 +158,12 @@ export default function ConnectPage() {
       try {
         const status = await binding.status();
         if (status.error === "permission_denied") {
-          setError(
-            "Full Disk Access required. Grant it in System Settings → Privacy & Security → Full Disk Access, then try again.",
-          );
+          // Bring up the full-screen guided permission flow instead of the
+          // old inline "Grant access →" text link. The flow auto-opens the
+          // right Settings pane, shows the steps visually, and polls until
+          // the user grants — then resumes ingestion from where we paused.
           setState(sourceId, "idle");
+          setPermissionFor({ sourceId, kind });
           return;
         }
         if (status.error === "not_found" || !status.canRead) {
@@ -206,6 +222,20 @@ export default function ConnectPage() {
         <div className="fixed bottom-5 left-1/2 -translate-x-1/2 max-w-md rounded-lg border-[0.5px] border-red-500/30 bg-red-50 px-4 py-2 text-[12px] text-red-700">
           {error}
         </div>
+      )}
+
+      {permissionFor && (
+        <PermissionsScreen
+          kind={permissionFor.kind}
+          sourceLabel={SOURCE_LABEL[permissionFor.sourceId] ?? "your data"}
+          onCancel={() => setPermissionFor(null)}
+          onGranted={async () => {
+            // Resume ingestion the moment access lands.
+            const sourceId = permissionFor.sourceId;
+            setPermissionFor(null);
+            await handleConnect(sourceId);
+          }}
+        />
       )}
     </>
   );

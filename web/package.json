@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev --turbo",
     "build": "next build",
-    "build:tauri": "NEXT_PUBLIC_TAURI_BUILD=true next build",
+    "build:tauri": "bash scripts/build-tauri.sh",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
