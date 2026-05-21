@@ -71,42 +71,48 @@
 
 
 /* -----------------------------------------------------------------------------
-   DARK MODE — tokens flip; component CSS never has to know
+   DARK MODE — opt-in only, NOT based on the OS preference
+   -----------------------------------------------------------------------------
+   The PMC app runs in light mode always (per the design brief — "Light
+   background throughout the app; the dark hero belongs to the marketing
+   site only"). We keep dark tokens defined for future opt-in surfaces by
+   gating them behind an explicit `[data-theme="dark"]` selector instead of
+   `@media (prefers-color-scheme: dark)`. Nothing sets that attribute today,
+   so every user — including those on macOS dark mode — sees the light
+   palette.
    ----------------------------------------------------------------------------- */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --label:                 #FFFFFF;
-    --secondary-label:       rgba(235, 235, 245, 0.60);
-    --tertiary-label:        rgba(235, 235, 245, 0.30);
-    --quaternary-label:      rgba(235, 235, 245, 0.18);
+[data-theme="dark"] {
+  --label:                 #FFFFFF;
+  --secondary-label:       rgba(235, 235, 245, 0.60);
+  --tertiary-label:        rgba(235, 235, 245, 0.30);
+  --quaternary-label:      rgba(235, 235, 245, 0.18);
 
-    --system-background:           #000000;
-    --secondary-system-background: #1C1C1E;
-    --tertiary-system-background:  #2C2C2E;
-    --grouped-background:          #000000;
+  --system-background:           #000000;
+  --secondary-system-background: #1C1C1E;
+  --tertiary-system-background:  #2C2C2E;
+  --grouped-background:          #000000;
 
-    --fill:                  rgba(235, 235, 245, 0.12);
-    --fill-secondary:        rgba(235, 235, 245, 0.08);
-    --fill-tertiary:         rgba(235, 235, 245, 0.04);
-    --fill-quaternary:       rgba(255, 255, 255, 0.02);
+  --fill:                  rgba(235, 235, 245, 0.12);
+  --fill-secondary:        rgba(235, 235, 245, 0.08);
+  --fill-tertiary:         rgba(235, 235, 245, 0.04);
+  --fill-quaternary:       rgba(255, 255, 255, 0.02);
 
-    --separator:             rgba(235, 235, 245, 0.12);
-    --separator-opaque:      #38383A;
+  --separator:             rgba(235, 235, 245, 0.12);
+  --separator-opaque:      #38383A;
 
-    --tint:                  #FF453A;
-    --tint-hover:            #FF6961;
-    --tint-press:            #E0322A;
+  --tint:                  #FF453A;
+  --tint-hover:            #FF6961;
+  --tint-press:            #E0322A;
 
-    --on-tint:               #FFFFFF;
+  --on-tint:               #FFFFFF;
 
-    --success:               #30D158;
-    --warning:               #FF9F0A;
-    --danger:                #FF453A;
+  --success:               #30D158;
+  --warning:               #FF9F0A;
+  --danger:                #FF453A;
 
-    --focus-ring:            rgba(10, 132, 255, 0.40);
-    --focus-ring-strong:     rgba(10, 132, 255, 0.55);
-  }
+  --focus-ring:            rgba(10, 132, 255, 0.40);
+  --focus-ring-strong:     rgba(10, 132, 255, 0.55);
 }
 
 
