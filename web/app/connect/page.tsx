@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ConnectScreen from "@/components/app/connect-screen";
-import { DEMO_USER_ID } from "@/lib/demo-user";
+import { useUser } from "@/hooks/use-user";
 import { NATIVE_INGEST, isTauri } from "@/lib/runtime";
 
 const PMC_API_URL =
@@ -35,7 +35,8 @@ const SOURCE_KIND: Record<string, string> = {
  */
 export default function ConnectPage() {
   const router = useRouter();
-  const userId = DEMO_USER_ID;
+  const { user } = useUser();
+  const userId = user?.pmcUserId ?? "";
   const [inApp, setInApp] = useState(false);
   const [states, setStates] = useState<Record<string, SourceState>>({});
   const [error, setError] = useState<string | null>(null);

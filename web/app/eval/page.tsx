@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import EvalScreen from "@/components/app/eval-screen";
-import { DEMO_USER_ID } from "@/lib/demo-user";
+import { useUser } from "@/hooks/use-user";
 
 const PMC_API_URL =
   process.env.NEXT_PUBLIC_PMC_API_URL ??
@@ -38,7 +38,8 @@ export default function EvalPage() {
   const [rounds, setRounds] = useState<EvalRound[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exiting, setExiting] = useState(false);
-  const userId = DEMO_USER_ID;
+  const { user } = useUser();
+  const userId = user?.pmcUserId ?? "";
 
   useEffect(() => {
     let cancelled = false;

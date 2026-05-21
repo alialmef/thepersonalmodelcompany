@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import CurateScreen from "@/components/app/curate-screen";
-import { DEMO_USER_ID } from "@/lib/demo-user";
+import { useUser } from "@/hooks/use-user";
 
 const PMC_API_URL =
   process.env.NEXT_PUBLIC_PMC_API_URL ??
@@ -43,7 +43,8 @@ function CuratePageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const jobId = searchParams.get("job");
-  const userId = searchParams.get("user") ?? DEMO_USER_ID;
+  const { user } = useUser();
+  const userId = searchParams.get("user") ?? user?.pmcUserId ?? "";
 
   const [events, setEvents] = useState<CurateEvent[]>([]);
   const [profileLines, setProfileLines] = useState<string[]>([]);

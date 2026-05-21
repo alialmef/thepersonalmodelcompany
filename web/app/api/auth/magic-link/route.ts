@@ -1,29 +1,40 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { sendMagicLink } from "@/lib/auth";
 
 /**
- * Stub for the magic-link endpoint.
+ * POST /api/auth/magic-link
+ * Body: { email: string }
  *
- * Full implementation lands when we wire Resend:
- *   1. Validate email
- *   2. Insert into magic_links table with a fresh token + 15min expiry
- *   3. Send email via Resend with link to /api/auth/verify?token=...
- *   4. Return 200 (always — don't leak whether the email exists)
+ * Sends a sign-in link to the email. Always returns 200 — we don't leak
+ * whether the email exists in our users table.
+ *
+ * In dev mode (no RESEND_API_KEY set), the response includes the link in
+ * `dev.link` so the developer can click it directly without setting up
+ * email infrastructure.
  */
+
+export const runtime = "nodejs";
 
 const Body = z.object({ email: z.string().email() });
 
 export async function POST(req: Request) {
-  let body;
+  let parsed: { email: string };
   try {
-    body = Body.parse(await req.json());
+    parsed = Body.parse(await req.json());
   } catch {
     return NextResponse.json({ error: "invalid email" }, { status: 400 });
   }
 
-  // TODO: persist magic link + send via Resend
-  console.log(`[magic-link] would send to ${body.email}`);
-
-  // Always 200 — don't leak account existence.
-  return NextResponse.json({ ok: true });
+  try {
+    const { devLink } = await sendMagicLink(parsed.email);
+    return NextResponse.json({
+      ok: true,
+      ...(devLink ? { dev: { link: devLink } } : {}),
+    });
+  } catch (e) {
+    console.error("[magic-link] failed:", e);
+    // Still return 200 so callers can't probe delivery failures.
+    return NextResponse.json({ ok: true });
+  }
 }

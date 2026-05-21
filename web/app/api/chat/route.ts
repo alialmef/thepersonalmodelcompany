@@ -16,22 +16,31 @@
  */
 
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { pmc, backendReachable } from "@/lib/pmc-client";
 import { chatTools } from "@/lib/tools";
-import { DEMO_USER_ID } from "@/lib/demo-user";
+import { SESSION_COOKIE, getSessionByToken } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
 interface ChatRequestBody {
   messages: UIMessage[];
-  userId?: string;
   firstContact?: boolean;
 }
 
 export async function POST(req: Request) {
+  // Resolve the signed-in user from the session cookie. /api/chat is gated
+  // by the same auth model as the rest of the app — no anonymous chat.
+  const jar = await cookies();
+  const sessionUser = await getSessionByToken(jar.get(SESSION_COOKIE)?.value);
+  if (!sessionUser) {
+    return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
+  }
+  const userId = sessionUser.pmcUserId;
+
   const body = (await req.json()) as ChatRequestBody;
-  const userId = body.userId ?? DEMO_USER_ID;
 
   if (!(await backendReachable())) {
     return offlineResponse();

@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import FirstMeeting from "@/components/app/first-meeting";
-import { DEMO_USER_ID } from "@/lib/demo-user";
+import { useUser } from "@/hooks/use-user";
 
 const PMC_API_URL =
   process.env.NEXT_PUBLIC_PMC_API_URL ??
@@ -27,7 +27,8 @@ const PMC_API_URL =
 function FirstMeetingInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const userId = searchParams.get("user") ?? DEMO_USER_ID;
+  const { user } = useUser();
+  const userId = searchParams.get("user") ?? user?.pmcUserId ?? "";
   const [openingLine, setOpeningLine] = useState<string | null>(null);
 
   useEffect(() => {
