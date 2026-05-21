@@ -1,14 +1,38 @@
 "use client";
 
-import { useEffect } from "react";
-import Link from "next/link";
+import { useEffect, useState } from "react";
+import { LetterCascade } from "@/components/shared/letter-cascade";
 
 const DMG_PATH = "/downloads/PersonalModelCompany.dmg";
 
+/**
+ * The download moment — the bridge from web to product.
+ *
+ * Full-bleed white. The mark scales in, the red dot blooms with overshoot
+ * (the choreography is defined in globals-app-additions.css as `.pmc-dl-mark`
+ * and `.pmc-dl-dot`), and a single-sentence headline arrives. The actual
+ * .dmg download fires the moment the page mounts so the user's browser
+ * shows their native download chrome while they read the install line.
+ *
+ * Voice / layout match the rest of the designed app (first-launch, welcome,
+ * etc.): one thought, one image, no chrome. The page deliberately has no
+ * back-to-home link — this is a moment, not a navigation hub. The browser's
+ * back button gets them home if they want.
+ *
+ * Choreography (from globals-app-additions.css):
+ *   0.3s   mark scales in (.pmc-dl-mark via pmc-mark-scale-in)
+ *   1.2s   red dot ignites with overshoot (.pmc-dl-dot via pmc-dot-appear)
+ *   2.0s   dot settles into its 2.6s forever breath (pmc-dot-pulse)
+ *   2.4s   headline + install line fade up (via pmc-anim-fade-up)
+ */
 export default function DownloadPage() {
-  // Auto-trigger the download on mount. Most browsers respect the navigation
-  // and start the download without leaving the page.
+  const [fallback, setFallback] = useState(false);
+
   useEffect(() => {
+    // Auto-fire the .dmg download. The browser handles it natively; this
+    // page stays put so the user sees the install message while bytes
+    // arrive. If after a few seconds nothing seems to have happened the
+    // fallback link appears in case the auto-trigger was blocked.
     const a = document.createElement("a");
     a.href = DMG_PATH;
     a.download = "PersonalModelCompany.dmg";
@@ -16,65 +40,78 @@ export default function DownloadPage() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+
+    const t = setTimeout(() => setFallback(true), 4000);
+    return () => clearTimeout(t);
   }, []);
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-white text-black px-7">
-      <div className="max-w-md text-center">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-white px-7 text-neutral-900">
+      {/* Mark — uses the existing .pmc-dl-* download-screen choreography */}
+      <div className="mb-12">
         <svg
-          viewBox="0 0 80 80"
-          width="64"
-          height="64"
-          className="mx-auto mb-8"
+          viewBox="0 0 100 100"
+          className="h-[clamp(96px,12vw,160px)] w-[clamp(96px,12vw,160px)]"
           aria-hidden="true"
         >
           <circle
-            cx="40"
-            cy="40"
-            r="30"
+            cx="50"
+            cy="50"
+            r="38"
             fill="none"
-            stroke="currentColor"
-            strokeWidth="0.75"
+            stroke="#1D1D1F"
+            strokeWidth="0.5"
+            className="pmc-dl-mark"
           />
-          <circle cx="40" cy="40" r="3" fill="#DC2626" />
+          <circle
+            cx="50"
+            cy="50"
+            r="3"
+            fill="#FF3B30"
+            className="pmc-dl-dot"
+          />
         </svg>
-
-        <h1 className="text-[32px] font-medium tracking-[-0.02em] mb-4">
-          Your download is starting.
-        </h1>
-        <p className="text-[15px] text-neutral-500 leading-relaxed mb-10">
-          If nothing happens,{" "}
-          <a
-            href={DMG_PATH}
-            download="PersonalModelCompany.dmg"
-            className="underline text-black"
-          >
-            click here to download
-          </a>
-          .
-        </p>
-
-        <div className="text-left max-w-sm mx-auto bg-neutral-50 rounded-lg p-5 text-[13px] text-neutral-600 leading-relaxed">
-          <p className="font-medium text-neutral-900 mb-2">After downloading</p>
-          <p>
-            Open the .dmg, drag <span className="text-neutral-900">Personal Model Company</span>{" "}
-            to Applications, then launch it from there.
-          </p>
-          <p className="mt-3 text-neutral-500">
-            macOS may warn that the app is unsigned — this is a local dev build.
-            Right-click the app → Open → Open to bypass.
-          </p>
-        </div>
-
-        <div className="mt-10">
-          <Link
-            href="/"
-            className="text-[13px] text-neutral-500 hover:text-black transition-colors"
-          >
-            ← Back to home
-          </Link>
-        </div>
       </div>
+
+      {/* Headline — lowercase, terminal period, no exclamation, sized to
+          feel like a Mac product page, not a tiny modal */}
+      <h1
+        className="mb-6 text-center font-medium leading-[0.98] tracking-[-0.035em] pmc-anim-fade-up"
+        style={{
+          fontSize: "clamp(40px, 6vw, 88px)",
+          animationDelay: "2.4s",
+        }}
+      >
+        your model is downloading.
+      </h1>
+
+      {/* Install instruction — single sentence, no separate "after
+          downloading" panel. Less scaffolding, more brand voice. */}
+      <p
+        className="mb-14 max-w-[36ch] text-center text-neutral-500 pmc-anim-fade-up"
+        style={{
+          fontSize: "clamp(15px, 1.6vw, 19px)",
+          animationDelay: "2.8s",
+        }}
+      >
+        <LetterCascade
+          text="open the .dmg, then drag personal model company to applications."
+          startMs={2800}
+          perLetterMs={22}
+        />
+      </p>
+
+      {/* Fallback — only after 4s, and only if the auto-trigger didn't
+          seem to fire. Quiet, undertstated link. */}
+      {fallback && (
+        <a
+          href={DMG_PATH}
+          download="PersonalModelCompany.dmg"
+          className="pmc-anim-fade text-[13px] text-neutral-500 underline decoration-neutral-300 underline-offset-[3px] transition-colors hover:text-neutral-900"
+        >
+          if nothing happened, tap here.
+        </a>
+      )}
     </main>
   );
 }
