@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import ConnectScreen from "@/components/app/connect-screen";
 import { PermissionsScreen } from "@/components/app/permissions-screen";
 import { useUser } from "@/hooks/use-user";
-import { NATIVE_INGEST, isTauri } from "@/lib/runtime";
+import { NATIVE_INGEST, ingestDocuments, isTauri } from "@/lib/runtime";
 
 const PMC_API_URL =
   process.env.NEXT_PUBLIC_PMC_API_URL ??
@@ -74,18 +74,25 @@ export default function ConnectPage() {
         );
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as {
-          sources?: Array<{ source_id?: string; kind?: string; item_count?: number }>;
+          raw_source_breakdown?: Array<{
+            source_id?: string;
+            kind?: string;
+            item_count?: number;
+          }>;
         };
         const next: Record<string, SourceState> = {};
-        for (const src of data.sources ?? []) {
+        for (const src of data.raw_source_breakdown ?? []) {
           if ((src.item_count ?? 0) <= 0) continue;
           // Backend "kind" → UI sourceId mapping (inverse of SOURCE_KIND below)
           const uiId = (
             {
               imessage: "messages",
               text: "notes",
+              notes: "notes",
               email_mbox: "mail",
+              email: "mail",
               document: "documents",
+              documents: "documents",
             } as Record<string, string>
           )[src.kind ?? ""];
           if (uiId) next[uiId] = "connected";
@@ -126,9 +133,11 @@ export default function ConnectPage() {
               setState(sourceId, "idle");
               return;
             }
-            // For V0 we just mark connected — actually uploading each picked
-            // file is wired through SourceRow upload elsewhere. The "did
-            // anything attach?" signal is what matters for the gate.
+            // open() returns string | string[] depending on multiple. Normalize.
+            const paths = Array.isArray(picked) ? picked : [picked];
+            // Send each picked path to the Rust uploader, which multipart-POSTs
+            // to /sources/upload so the backend can parse PDFs / DOCX too.
+            await ingestDocuments(userId, paths);
             setState(sourceId, "connected");
             return;
           }
@@ -157,16 +166,16 @@ export default function ConnectPage() {
 
       try {
         const status = await binding.status();
-        if (status.error === "permission_denied") {
-          // Bring up the full-screen guided permission flow instead of the
-          // old inline "Grant access →" text link. The flow auto-opens the
-          // right Settings pane, shows the steps visually, and polls until
-          // the user grants — then resumes ingestion from where we paused.
+        if (status.error === "permission_denied" || !status.canRead) {
+          // Always route to the full-screen guided permission flow when we
+          // can't read. Both "permission_denied" and any other unreadable
+          // state should land here — the screen will auto-open System
+          // Settings, show the steps, and poll until access lands.
           setState(sourceId, "idle");
           setPermissionFor({ sourceId, kind });
           return;
         }
-        if (status.error === "not_found" || !status.canRead) {
+        if (status.error === "not_found") {
           setError(`${sourceId} unavailable on this Mac`);
           setState(sourceId, "idle");
           return;
@@ -174,7 +183,31 @@ export default function ConnectPage() {
         await binding.ingest(userId);
         setState(sourceId, "connected");
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        // The Rust side throws IngestError::PermissionDenied as a JSON
+        // payload with kind: "permission_denied". The Tauri JS bridge
+        // turns this into a thrown value. Detect FDA-related throws by
+        // either the structured kind or the message substring, and surface
+        // the guided permission flow rather than the red toast.
+        const raw = e as unknown;
+        const msg =
+          typeof raw === "string"
+            ? raw
+            : raw instanceof Error
+              ? raw.message
+              : JSON.stringify(raw);
+        const looksLikeFda =
+          /permission[_ ]denied/i.test(msg) ||
+          /full disk access/i.test(msg) ||
+          (typeof raw === "object" &&
+            raw !== null &&
+            "kind" in raw &&
+            (raw as { kind?: string }).kind === "permission_denied");
+        if (looksLikeFda) {
+          setState(sourceId, "idle");
+          setPermissionFor({ sourceId, kind });
+          return;
+        }
+        setError(msg);
         setState(sourceId, "idle");
       }
     },

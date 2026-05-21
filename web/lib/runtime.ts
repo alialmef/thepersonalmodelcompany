@@ -150,6 +150,23 @@ export async function ingestNotes(
 }
 
 /**
+ * Multipart-upload a set of picked document paths to the backend's
+ * /v1/users/{id}/sources/upload endpoint. .txt / .md go through as kind=text
+ * (plain RawItems), everything else as kind=document (backend parser
+ * extracts text from PDFs, DOCX, etc).
+ */
+export async function ingestDocuments(
+  userId: string,
+  paths: string[],
+): Promise<IngestSummary> {
+  if (!isTauri()) {
+    throw new Error("ingestDocuments() requires the Tauri runtime");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<IngestSummary>("ingest_documents", { userId, paths });
+}
+
+/**
  * Map of source kinds → Tauri command bindings for native ingestion. The
  * Connect page uses this to decide whether to render the native flow or the
  * upload fallback for each row.

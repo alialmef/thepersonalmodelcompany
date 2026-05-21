@@ -323,6 +323,82 @@ async fn post_items(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Documents — multipart-upload each picked file to /sources/upload so the
+// backend can extract text (PDFs, DOCX) via its own parsers. .txt / .md go
+// through as kind="text" so they end up as plain RawItems.
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+async fn ingest_documents(
+    user_id: String,
+    paths: Vec<String>,
+) -> Result<IngestSummary, IngestError> {
+    use std::path::Path;
+    let client = reqwest::Client::new();
+    let now = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let source_id = format!("documents-{now}");
+    let mut total: usize = 0;
+
+    for path_str in &paths {
+        let path = Path::new(path_str);
+        let bytes = tokio::fs::read(path)
+            .await
+            .map_err(|e| IngestError::ReadError(format!("{}: {e}", path.display())))?;
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("upload")
+            .to_string();
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default();
+        let kind = match ext.as_str() {
+            "txt" | "md" | "markdown" | "mdx" | "rtf" => "text",
+            _ => "document",
+        };
+
+        let part = reqwest::multipart::Part::bytes(bytes).file_name(filename.clone());
+        let form = reqwest::multipart::Form::new()
+            .text("kind", kind)
+            .text("source_id", source_id.clone())
+            .part("file", part);
+        let url = format!(
+            "{}/v1/users/{}/sources/upload",
+            backend_url(),
+            urlencoding::encode(&user_id),
+        );
+        let response = client
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| IngestError::HttpError(e.to_string()))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(IngestError::HttpError(format!(
+                "backend {status} uploading {filename}: {text}"
+            )));
+        }
+        let parsed: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| IngestError::HttpError(e.to_string()))?;
+        if let Some(n) = parsed.get("raw_items_ingested").and_then(|v| v.as_u64()) {
+            total += n as usize;
+        }
+    }
+
+    Ok(IngestSummary {
+        source: "document",
+        source_id,
+        items_ingested: total,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -339,6 +415,7 @@ pub fn run() {
             ingest_mail,
             notes_status,
             ingest_notes,
+            ingest_documents,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

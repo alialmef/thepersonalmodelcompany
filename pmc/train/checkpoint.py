@@ -19,7 +19,13 @@ from pathlib import Path
 from typing import Any
 
 ADAPTER_CONFIG_FILE = "adapter_config.json"
-ADAPTER_WEIGHTS_FILES = ("adapter_model.safetensors", "adapter_model.bin")
+# PEFT/HF use adapter_model.* ; MLX-LM writes adapters.safetensors. Accept both
+# so the local Apple-Silicon training path validates the same as the cloud path.
+ADAPTER_WEIGHTS_FILES = (
+    "adapter_model.safetensors",
+    "adapter_model.bin",
+    "adapters.safetensors",
+)
 
 
 @dataclass

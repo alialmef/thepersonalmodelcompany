@@ -37,9 +37,15 @@ interface CurateEvent {
   text: string;
 }
 
+interface SourceCount {
+  label: string;
+  count: number;
+}
+
 interface CurateScreenProps {
   events: CurateEvent[];
   profileLines: string[];
+  sourceCounts?: SourceCount[];
   onContinue?: () => void;
   isComplete?: boolean;
 }
@@ -47,9 +53,11 @@ interface CurateScreenProps {
 export default function CurateScreen({
   events,
   profileLines,
+  sourceCounts = [],
   onContinue,
   isComplete,
 }: CurateScreenProps) {
+  const total = sourceCounts.reduce((s, x) => s + x.count, 0);
   return (
     <div className="mx-auto min-h-screen max-w-[620px] bg-white px-7 pt-12 pb-14">
       <header className="mb-10 flex items-center gap-3">
@@ -63,12 +71,14 @@ export default function CurateScreen({
         Reading you.
       </h1>
       <p
-        className="mb-10 text-[14px] leading-[1.5] text-neutral-500 pmc-anim-fade-up"
+        className="mb-8 text-[14px] leading-[1.5] text-neutral-500 pmc-anim-fade-up"
         style={{ animationDelay: '0.3s' }}
       >
         This takes a few minutes. You can close the window — we&apos;ll keep
         going.
       </p>
+
+      <SourceScoreboard sources={sourceCounts} total={total} />
 
       <div className="grid grid-cols-2 gap-6">
         <EventStream events={events} />
@@ -85,6 +95,51 @@ export default function CurateScreen({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function SourceScoreboard({
+  sources,
+  total,
+}: {
+  sources: SourceCount[];
+  total: number;
+}) {
+  const empty = sources.length === 0;
+  return (
+    <div className="mb-10 rounded-[10px] border-[0.5px] border-neutral-200 bg-white">
+      <div className="flex items-baseline justify-between px-5 pt-4 pb-2">
+        <h2 className="text-[10px] uppercase tracking-[0.08em] text-neutral-500">
+          Your writing
+        </h2>
+        <div className="font-mono text-[12px] text-neutral-500 tabular-nums">
+          {empty ? "counting…" : `${total.toLocaleString()} items`}
+        </div>
+      </div>
+      <div className="flex flex-col gap-px overflow-hidden bg-neutral-200">
+        {empty ? (
+          <div className="flex items-center justify-between bg-white px-5 py-3">
+            <div className="text-[14px] tracking-[-0.005em] text-neutral-500">
+              Reading from your connected sources…
+            </div>
+          </div>
+        ) : (
+          sources.map((s) => (
+            <div
+              key={s.label}
+              className="flex items-center justify-between bg-white px-5 py-3"
+            >
+              <div className="text-[14px] tracking-[-0.005em] text-neutral-900">
+                {s.label}
+              </div>
+              <div className="font-mono text-[14px] tabular-nums text-neutral-900">
+                {s.count.toLocaleString()}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

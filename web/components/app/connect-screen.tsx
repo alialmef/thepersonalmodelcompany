@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Mail,
   Notebook,
   FileText,
   MessageSquare,
@@ -41,13 +40,6 @@ const SOURCES: Source[] = [
     name: 'Documents',
     detail: 'Drag in, or pick a folder',
     cta: 'Add',
-  },
-  {
-    id: 'mail',
-    icon: Mail,
-    name: 'Mail',
-    detail: 'Gmail · sign in to connect',
-    cta: 'Connect',
   },
 ];
 
