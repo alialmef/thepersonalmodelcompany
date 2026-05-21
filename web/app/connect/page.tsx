@@ -45,6 +45,49 @@ export default function ConnectPage() {
     setInApp(isTauri());
   }, []);
 
+  // Pre-populate connected sources for returning users. Fetches the
+  // backend status and marks any source kind with raw items as "connected".
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const apiUrl =
+          process.env.NEXT_PUBLIC_PMC_API_URL ?? "http://localhost:8000";
+        const res = await fetch(
+          `${apiUrl}/v1/users/${encodeURIComponent(userId)}/status`,
+          { cache: "no-store", signal: AbortSignal.timeout(3000) },
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          sources?: Array<{ source_id?: string; kind?: string; item_count?: number }>;
+        };
+        const next: Record<string, SourceState> = {};
+        for (const src of data.sources ?? []) {
+          if ((src.item_count ?? 0) <= 0) continue;
+          // Backend "kind" → UI sourceId mapping (inverse of SOURCE_KIND below)
+          const uiId = (
+            {
+              imessage: "messages",
+              text: "notes",
+              email_mbox: "mail",
+              document: "documents",
+            } as Record<string, string>
+          )[src.kind ?? ""];
+          if (uiId) next[uiId] = "connected";
+        }
+        if (!cancelled && Object.keys(next).length > 0) {
+          setStates((prev) => ({ ...next, ...prev }));
+        }
+      } catch {
+        /* backend offline — let the user connect fresh */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   const setState = (sourceId: string, state: SourceState) =>
     setStates((prev) => ({ ...prev, [sourceId]: state }));
 

@@ -5,6 +5,7 @@ import { DefaultChatTransport } from "ai";
 import { useEffect, useMemo, useState } from "react";
 
 import ChatScreen from "@/components/app/chat-screen";
+import { SettingsDrawer } from "@/components/app/settings-drawer";
 
 interface Message {
   id: string;
@@ -29,6 +30,7 @@ interface MessagePart {
 export default function ChatPage() {
   const [seeded, setSeeded] = useState(false);
   const [carry, setCarry] = useState<{ opening: string; firstReply: string } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const transport = useMemo(
     () => new DefaultChatTransport({ api: "/api/chat" }),
@@ -96,9 +98,11 @@ export default function ChatPage() {
       <ChatScreen
         messages={visible}
         onSend={(text) => sendMessage({ text })}
-        onOpenSettings={() => {
-          // Settings drawer is a follow-up — for now a no-op.
-        }}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+      <SettingsDrawer
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
       {error && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 rounded-lg bg-red-50 px-4 py-2 text-[12px] text-red-700">
