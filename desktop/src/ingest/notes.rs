@@ -187,7 +187,7 @@ pub fn read_notes(limit: Option<usize>) -> Result<Vec<RawItemJson>, IngestError>
             .flatten();
 
         items.push(RawItemJson {
-            source_type: "text",
+            source_type: "notes",
             source_id: path.to_string_lossy().to_string(),
             content: content.to_string(),
             timestamp,

@@ -16,6 +16,87 @@ interface CurateEvent {
   text: string;
 }
 
+interface SourceCount {
+  label: string;
+  count: number;
+}
+
+function sourceLabel(kind: string): string {
+  switch (kind) {
+    case "imessage":
+      return "Messages";
+    case "notes":
+    case "text":
+      return "Notes";
+    case "document":
+      return "Documents";
+    case "email_mbox":
+    case "email":
+      return "Mail";
+    case "whatsapp":
+      return "WhatsApp";
+    default:
+      return kind || "Other";
+  }
+}
+
+/**
+ * When the backend doesn't ship a text style profile, synthesize a few
+ * "lay of your writing" lines from the real curate stats. Keeps step 2
+ * feeling substantive even without an LLM-generated narrative.
+ */
+function synthesizeProfile(d: Record<string, unknown>): string[] {
+  const lines: string[] = [];
+  const input = numFrom(d.input_conversations);
+  const output = numFrom(d.output_completions);
+  const droppedShort = numFrom(d.dropped_short);
+  const droppedDup = numFrom(d.dropped_duplicate);
+  const redacted = numFrom(d.redacted_severe);
+
+  if (input !== null) {
+    lines.push(`Read ${input.toLocaleString()} conversations from your writing.`);
+  }
+  if (output !== null) {
+    lines.push(
+      `Kept ${output.toLocaleString()} examples that look like you on a good day.`,
+    );
+  }
+  if (droppedShort !== null && droppedShort > 0) {
+    lines.push(`Dropped ${droppedShort.toLocaleString()} replies too short to teach from.`);
+  }
+  if (droppedDup !== null && droppedDup > 0) {
+    lines.push(`Removed ${droppedDup.toLocaleString()} near-duplicates.`);
+  }
+  if (redacted !== null && redacted > 0) {
+    lines.push(`Redacted ${redacted.toLocaleString()} items with sensitive content.`);
+  }
+  return lines;
+}
+
+function numFrom(x: unknown): number | null {
+  return typeof x === "number" ? x : null;
+}
+
+function labelKind(k: unknown): string {
+  if (typeof k !== "string") return "your data";
+  switch (k) {
+    case "imessage":
+      return "Messages";
+    case "notes":
+    case "text":
+      return "Notes";
+    case "document":
+      return "Documents";
+    case "email_mbox":
+    case "email":
+      return "Mail";
+    case "whatsapp":
+      return "WhatsApp";
+    default:
+      return k;
+  }
+}
+
 interface AuditEvent {
   timestamp?: string;
   stage?: string;
@@ -49,7 +130,56 @@ function CuratePageInner() {
   const [events, setEvents] = useState<CurateEvent[]>([]);
   const [profileLines, setProfileLines] = useState<string[]>([]);
   const [isComplete, setIsComplete] = useState(false);
+  const [sourceCounts, setSourceCounts] = useState<SourceCount[]>([]);
   const trainSeenRef = useRef(false);
+
+  // Poll user status to render a live per-source scoreboard. Step 2 should
+  // feel substantive — "I am reading you" only works if the user can see
+  // the actual counts as they accumulate.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch(
+          `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/status`,
+          { cache: "no-store" },
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          raw_source_breakdown?: Array<{
+            source_id?: string;
+            kind?: string;
+            item_count?: number;
+          }>;
+        };
+        const merged = new Map<string, SourceCount>();
+        for (const s of data.raw_source_breakdown ?? []) {
+          const label = sourceLabel(s.kind ?? "");
+          const prev = merged.get(label);
+          merged.set(label, {
+            label,
+            count: (prev?.count ?? 0) + (s.item_count ?? 0),
+          });
+        }
+        if (!cancelled) {
+          setSourceCounts(
+            Array.from(merged.values())
+              .filter((s) => s.count > 0)
+              .sort((a, b) => b.count - a.count),
+          );
+        }
+      } catch {
+        /* keep polling — backend hiccups are non-fatal here */
+      }
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [userId]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -68,31 +198,31 @@ function CuratePageInner() {
         return;
       }
 
-      // Once the train stage emits an event, kick to /train.
-      if (parsed.stage === "train" && !trainSeenRef.current) {
+      // Track that training started so the Continue button can take the user
+      // there, but DON'T auto-route. Step 2 is a deliberate pause — the user
+      // gets to see their numbers and the lay of their writing first.
+      if (parsed.stage === "train") {
         trainSeenRef.current = true;
-        router.push(
-          `/train?job=${encodeURIComponent(jobId)}&user=${encodeURIComponent(userId)}`,
-        );
-        es.close();
         return;
       }
 
-      // job_finished arriving here means curate or earlier stage failed,
-      // OR the pipeline skipped train entirely. Either way we route on.
+      // job_finished while we're still on curate means the pipeline finished
+      // end-to-end. Mark complete; the user advances via Continue.
       if (parsed.event === "job_finished") {
-        if (parsed.status === "completed") {
-          router.push(`/eval?user=${encodeURIComponent(userId)}`);
-        }
+        setIsComplete(true);
         es.close();
         return;
       }
 
-      // Pull style profile lines from curate_completed payload.
+      // Pull style profile lines from curate_completed. When the backend
+      // doesn't carry text observations, synthesize a few lines from the
+      // real stats so the right column has substance.
       if (parsed.event === "curate_completed" && parsed.data) {
         const summary = parsed.data.style_profile_summary;
         if (Array.isArray(summary)) {
           setProfileLines(summary.filter((s): s is string => typeof s === "string"));
+        } else {
+          setProfileLines(synthesizeProfile(parsed.data));
         }
         setIsComplete(true);
       }
@@ -120,16 +250,12 @@ function CuratePageInner() {
     <CurateScreen
       events={events}
       profileLines={profileLines}
+      sourceCounts={sourceCounts}
       isComplete={isComplete}
       onContinue={() => {
-        // The pipeline is already running and will auto-navigate to /train
-        // when training begins. Continue is a soft acknowledgment — if the
-        // user clicks before training kicks off, just keep waiting.
-        if (trainSeenRef.current) {
-          router.push(
-            `/train?job=${encodeURIComponent(jobId)}&user=${encodeURIComponent(userId)}`,
-          );
-        }
+        router.push(
+          `/train?job=${encodeURIComponent(jobId)}&user=${encodeURIComponent(userId)}`,
+        );
       }}
     />
   );
@@ -165,14 +291,18 @@ function formatEventText(ev: AuditEvent): string {
   const data = ev.data ?? {};
 
   const friendly: Record<string, (d: Record<string, unknown>) => string> = {
+    items_pushed_via_native: (d) =>
+      `Read ${num(d.items)} ${plural(d.items, "item")} from ${labelKind(d.kind)}.`,
     ingest_completed: (d) => `Read ${num(d.items)} ${plural(d.items, "item")}.`,
+    source_uploaded: (d) =>
+      `Added ${num(d.items)} ${plural(d.items, "item")} from ${d.filename ?? labelKind(d.kind)}.`,
     curate_started: () => "Curating your writing.",
     dedupe_completed: (d) => `Removed ${num(d.removed)} duplicates.`,
     quality_filter: (d) => `Filtered ${num(d.filtered)} short replies.`,
     pii_filter: (d) => `Excluded ${num(d.filtered)} items with sensitive info.`,
     style_profile_built: () => "Style profile built.",
     curate_completed: (d) =>
-      `Curate finished — ${num(d.kept)} ${plural(d.kept, "example")} ready.`,
+      `Curate finished — kept ${num(d.output_completions)} of ${num(d.input_conversations)} conversations.`,
   };
 
   if (evName in friendly) {

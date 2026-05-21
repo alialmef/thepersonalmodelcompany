@@ -31,6 +31,9 @@ class UserStatus(BaseModel):
     pending_tombstones: int = 0
     raw_sources: list[str] = Field(default_factory=list)
     raw_item_count: int = 0
+    # Per-source item counts so the UI can render a live scoreboard
+    # ("Messages 12,431 · Notes 47"). Each entry is {source_id, kind, item_count}.
+    raw_source_breakdown: list[dict] = Field(default_factory=list)
     dataset_versions: list[str] = Field(default_factory=list)
     registered_for_serving: bool = False
     recent_events: list[AuditEvent] = Field(default_factory=list)
@@ -67,6 +70,17 @@ class Monitor:
         status.has_profile = self.user_store.load_user(user_id) is not None
         status.raw_sources = self.user_store.list_sources(user_id)
         status.raw_item_count = self.user_store.count_raw_items(user_id)
+        # Per-source counts. Infer kind from the source_id prefix; the native
+        # ingesters all use a "<kind>-YYYYMMDD-HHMMSS" naming convention.
+        breakdown = []
+        for src in status.raw_sources:
+            kind = src.split("-", 1)[0] if "-" in src else src
+            try:
+                count = self.user_store.count_raw_items(user_id, src)
+            except Exception:
+                count = 0
+            breakdown.append({"source_id": src, "kind": kind, "item_count": count})
+        status.raw_source_breakdown = breakdown
         status.dataset_versions = self.user_store.list_dataset_versions(user_id)
 
         runs = self.artifact_store.list_runs(user_id)
