@@ -4,7 +4,7 @@
     "builder": "RAILPACK"
   },
   "deploy": {
-    "preDeployCommand": "bunx drizzle-kit push --force",
+    "preDeployCommand": "bun run scripts/predeploy.ts",
     "startCommand": "bun start",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
