@@ -125,8 +125,7 @@ export function Hero() {
 
         <div className="pmc-anim-fade" style={{ animationDelay: '4.5s' }}>
           <a
-            href="/downloads/PersonalModelCompany.dmg"
-            download="PersonalModelCompany.dmg"
+            href="/download"
             className="inline-block rounded-full bg-black px-[28px] py-[14px] text-[15px] font-medium text-white"
           >
             Download for Mac
