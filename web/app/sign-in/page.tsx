@@ -1,34 +1,60 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Brand } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 
 /**
- * Act 1 — sign-in.
+ * Sign-in. One input, one button. Magic-link sent.
  *
- * One input, one button. Magic link sent. The mode after submit is a small
- * confirmation, not a screen change — the form stays so they remember what
- * email they used.
+ * After submit, the form stays (so the user remembers what email they used)
+ * and a confirmation message appears below. If the request comes back with
+ * `dev.link` (no Resend configured), we show a "Open dev link" affordance
+ * so local development works without setting up email DNS.
+ *
+ * If the user arrived here via `/sign-in?expired=1` (the verify route's
+ * fallback for missing/expired/used tokens), we render a small banner.
+ *
+ * Honors `?next=<path>` — preserved through the email round-trip via the
+ * magic-link URL, so post-sign-in the user lands on the page they wanted.
  */
-export default function SignInPage() {
+
+interface MagicLinkResponse {
+  ok?: boolean;
+  dev?: { link: string };
+}
+
+function SignInInner() {
+  const params = useSearchParams();
+  const expired = params.get("expired") === "1";
+  const next = params.get("next") ?? "/welcome";
+
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [devLink, setDevLink] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!email) return;
     setState("sending");
     setError(null);
+    setDevLink(null);
     try {
       const r = await fetch("/api/auth/magic-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, next }),
       });
       if (!r.ok) throw new Error("Could not send the link. Try again.");
+      const data = (await r.json()) as MagicLinkResponse;
+      if (data.dev?.link) {
+        // Append next= so post-verify lands on the right page even in dev.
+        const withNext = appendQuery(data.dev.link, { next });
+        setDevLink(withNext);
+      }
       setState("sent");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -53,6 +79,12 @@ export default function SignInPage() {
             Enter your email. We&apos;ll send a link.
           </p>
 
+          {expired && (
+            <p className="mb-6 text-[13px] text-muted text-center">
+              That link is expired or already used. Send a new one.
+            </p>
+          )}
+
           <form onSubmit={onSubmit} className="space-y-4">
             <input
               type="email"
@@ -75,11 +107,25 @@ export default function SignInPage() {
           </form>
 
           {state === "sent" && (
-            <p className="mt-8 text-[14px] text-muted text-center leading-relaxed">
-              We sent a link to <span className="text-foreground">{email}</span>.
-              <br />
-              Open it on this device to sign in.
-            </p>
+            <div className="mt-8 text-center">
+              <p className="text-[14px] text-muted leading-relaxed">
+                We sent a link to <span className="text-foreground">{email}</span>.
+                <br />
+                Open it on this device to sign in.
+              </p>
+              {devLink && (
+                <p className="mt-6 text-[12px] text-muted">
+                  Dev mode (no email service configured):{" "}
+                  <a
+                    href={devLink}
+                    className="underline text-foreground"
+                  >
+                    open the link here
+                  </a>
+                  .
+                </p>
+              )}
+            </div>
           )}
 
           {error && (
@@ -96,5 +142,25 @@ export default function SignInPage() {
         </Link>
       </footer>
     </main>
+  );
+}
+
+function appendQuery(url: string, extra: Record<string, string>): string {
+  try {
+    const u = new URL(url);
+    for (const [k, v] of Object.entries(extra)) {
+      u.searchParams.set(k, v);
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen" />}>
+      <SignInInner />
+    </Suspense>
   );
 }
