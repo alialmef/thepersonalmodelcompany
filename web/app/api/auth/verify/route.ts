@@ -25,16 +25,22 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";
-  const nextParam = url.searchParams.get("next") ?? "/welcome";
-  const next = nextParam.startsWith("/") && !nextParam.startsWith("//")
-    ? nextParam
-    : "/welcome";
+
+  // Caller may pass `next=` to override smart routing — used for protected-
+  // route redirects (middleware sets next=<original-path>). Otherwise we
+  // ask the backend what state this user is in and route accordingly.
+  const explicit = url.searchParams.get("next");
+  const explicitSafe =
+    explicit && explicit.startsWith("/") && !explicit.startsWith("//")
+      ? explicit
+      : null;
 
   const result = await verifyMagicLink(token);
   if (!result) {
     return NextResponse.redirect(new URL("/sign-in?expired=1", req.url));
   }
 
+  const next = explicitSafe ?? (await smartLanding(result.user.pmcUserId));
   const response = NextResponse.redirect(new URL(next, req.url));
   const isProd = process.env.NODE_ENV === "production";
 
@@ -48,11 +54,40 @@ export async function GET(req: Request) {
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
 
-  // The `next/headers` cookies() store is preferred in Server Components,
-  // but for a Route Handler the response cookies above are what stick on
-  // the redirect. Importing cookies() ensures the route is treated as
-  // dynamic in Next 15 builds.
   await cookies();
-
   return response;
+}
+
+/**
+ * Where should this user land after sign-in? Picked from backend state:
+ *   - Has a registered adapter → /chat (their model is ready)
+ *   - Has ingested raw items but no adapter → /train (resume the journey)
+ *   - Fresh / no state → /welcome (the Hello moment)
+ *
+ * Backend unreachable falls back to /welcome — getting them through the
+ * door beats sending them to a broken page.
+ */
+async function smartLanding(pmcUserId: string): Promise<string> {
+  const apiUrl = process.env.PMC_API_URL ?? "http://localhost:8000";
+  try {
+    // Has the user been registered with an adapter?
+    const modelRes = await fetch(
+      `${apiUrl}/v1/models/${encodeURIComponent(pmcUserId)}`,
+      { cache: "no-store", signal: AbortSignal.timeout(2000) },
+    );
+    if (modelRes.ok) return "/chat";
+
+    // Otherwise check whether they've ingested any data.
+    const statusRes = await fetch(
+      `${apiUrl}/v1/users/${encodeURIComponent(pmcUserId)}/status`,
+      { cache: "no-store", signal: AbortSignal.timeout(2000) },
+    );
+    if (statusRes.ok) {
+      const data = (await statusRes.json()) as { raw_item_count?: number };
+      if ((data.raw_item_count ?? 0) > 0) return "/train";
+    }
+  } catch {
+    /* backend offline — fall through to /welcome */
+  }
+  return "/welcome";
 }
