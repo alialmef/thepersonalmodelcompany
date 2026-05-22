@@ -20,6 +20,12 @@ dependencies = [
     # is the inference engine or supervisors run.
     "anthropic>=0.25",
     "openai>=1.30",
+    # Auth: account/session storage on SQLite by default, Postgres
+    # via psycopg when DATABASE_URL is set (Railway).
+    "psycopg[binary]>=3.1",
+    # Magic-link email delivery via Resend. Falls back to console
+    # logging if RESEND_API_KEY isn't set.
+    "resend>=0.7",
 ]
 
 [project.scripts]
