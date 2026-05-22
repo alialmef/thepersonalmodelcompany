@@ -5,11 +5,12 @@
 //! prints stats so we can iterate on the decoder without rebuilding the
 //! whole Tauri app each time.
 //!
-//! Usage:
-//!   cd desktop && cargo run --bin test_imessage
-//!   cd desktop && cargo run --bin test_imessage -- --sample 5
+//! Lives in `examples/` (not `src/bin/`) so Tauri's bundler ignores it.
+//! Run with:
+//!   cd desktop && cargo run --example test_imessage --release
+//!   cd desktop && cargo run --example test_imessage --release -- --sample 5
 //!     (show first 5 decoded message bodies)
-//!   cd desktop && cargo run --bin test_imessage -- --limit 1000
+//!   cd desktop && cargo run --example test_imessage --release -- --limit 1000
 //!     (cap the read to 1000 rows for faster iteration)
 
 use pmc_desktop_lib::ingest::imessage::{

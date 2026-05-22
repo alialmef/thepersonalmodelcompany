@@ -72,6 +72,7 @@ class AdapterRegistry:
             bundle_dir=str(Path(bundle_dir).resolve()) if bundle_dir else None,
             adapter_size_mb=round(info.size_bytes / (1024 * 1024), 3),
             rank=info.rank,
+            metadata=_remote_metadata(adapter_path),
         )
         self._records[user_id] = record
         self._save()
@@ -163,3 +164,24 @@ class AdapterRegistry:
             "saved_at": datetime.now().isoformat(),
         }
         self._registry_path().write_text(json.dumps(data, indent=2, default=str))
+
+
+def _remote_metadata(adapter_path: Path) -> dict[str, str]:
+    remote_path = adapter_path / "remote.json"
+    if not remote_path.is_file():
+        return {}
+    try:
+        remote = json.loads(remote_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    provider = str(remote.get("provider") or "")
+    if provider != "together":
+        return {"provider": provider} if provider else {}
+    metadata: dict[str, str] = {"provider": "together"}
+    if remote.get("job_id"):
+        metadata["together_job_id"] = str(remote["job_id"])
+    if remote.get("base_model"):
+        metadata["together_base_model"] = str(remote["base_model"])
+    if remote.get("output_model"):
+        metadata["together_output_model"] = str(remote["output_model"])
+    return metadata

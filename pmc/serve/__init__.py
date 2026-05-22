@@ -6,6 +6,7 @@ from pmc.serve.engine_together import (
     DEFAULT_BASE_URL as TOGETHER_DEFAULT_BASE_URL,
     TogetherEngine,
     set_together_adapter_id,
+    set_together_output_model,
 )
 from pmc.serve.export import export_adapter_only, export_bundle
 from pmc.serve.registry import AdapterRecord, AdapterRegistry
@@ -50,4 +51,5 @@ __all__ = [
     "export_bundle",
     "make_error",
     "set_together_adapter_id",
+    "set_together_output_model",
 ]

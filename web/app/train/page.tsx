@@ -3,7 +3,9 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { TrainInProgress } from "@/components/app/train-screen";
+import TrainingScreen, {
+  type CheckpointSample,
+} from "@/components/app/training-screen";
 import { useUser } from "@/hooks/use-user";
 
 const PMC_API_URL =
@@ -11,48 +13,25 @@ const PMC_API_URL =
   process.env.NEXT_PUBLIC_API_URL ??
   "http://localhost:8000";
 
+const FIXED_PROMPT = "Tell me about your weekend.";
+
 interface AuditEvent {
   timestamp?: string;
   stage?: string;
   event?: string;
   data?: Record<string, unknown>;
-  status?: string;
 }
 
-interface TrainingStats {
-  loss: number;
-  step: number;
-  totalSteps: number;
-  series: Array<{ step: number; loss: number }>;
-  etaMinutes: number;
-}
-
-/**
- * Screen 5 — Training your model.
- *
- * Consumes the backend SSE event stream and surfaces the train-stage events
- * as live training statistics for the loss curve. Filters to `mlx_step`
- * events emitted by `pmc/train/mlx_trainer.py` and tracks (step, loss)
- * points as they arrive.
- *
- * On `job_finished` → /eval (which then leads to /first-meeting and /chat).
- */
-function TrainPageInner() {
+function TrainInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const jobId = searchParams.get("job");
   const { user } = useUser();
   const userId = searchParams.get("user") ?? user?.pmcUserId ?? "";
 
-  const [stats, setStats] = useState<TrainingStats>({
-    loss: 0,
-    step: 0,
-    totalSteps: 100,
-    series: [],
-    etaMinutes: 40,
-  });
-  const [done, setDone] = useState<"ok" | "fail" | null>(null);
-  const startedAtRef = useRef<number>(Date.now());
+  const [samples, setSamples] = useState<CheckpointSample[]>([]);
+  const [done, setDone] = useState(false);
+  const seenRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!jobId) return;
@@ -64,99 +43,54 @@ function TrainPageInner() {
         es.close();
         return;
       }
-      let parsed: AuditEvent;
+      let ev: AuditEvent;
       try {
-        parsed = JSON.parse(msg.data) as AuditEvent;
+        ev = JSON.parse(msg.data) as AuditEvent;
       } catch {
         return;
       }
 
-      if (parsed.event === "job_finished") {
-        if (parsed.status === "completed") {
-          setDone("ok");
-          setTimeout(
-            () => router.push(`/eval?user=${encodeURIComponent(userId)}`),
-            1800,
-          );
-        } else {
-          setDone("fail");
-        }
-        es.close();
+      if (ev.event === "checkpoint_sample" && ev.data) {
+        const stage = ev.data.stage as "baseline" | "final" | undefined;
+        const response = ev.data.response as string | undefined;
+        if (!stage || !response) return;
+        if (seenRef.current.has(stage)) return;
+        seenRef.current.add(stage);
+        setSamples((prev) => [
+          ...prev,
+          { stage, response, model: ev.data?.model as string | undefined },
+        ]);
         return;
       }
 
-      // Pull mlx training metrics.
-      const data = parsed.data ?? {};
-      if (parsed.event === "mlx_train_starting") {
-        const iters = typeof data.iters === "number" ? data.iters : 100;
-        setStats((s) => ({ ...s, totalSteps: iters }));
-      } else if (parsed.event === "mlx_step" && typeof data.step === "number") {
-        const step = data.step;
-        const loss =
-          typeof data.train_loss === "number"
-            ? data.train_loss
-            : typeof data.val_loss === "number"
-            ? data.val_loss
-            : null;
-        if (loss === null) return;
-
-        setStats((s) => {
-          const series = [...s.series, { step, loss }];
-          // ETA: extrapolate from current rate.
-          const elapsedMin = (Date.now() - startedAtRef.current) / 60_000;
-          const remain =
-            step > 0
-              ? Math.max(1, Math.round((s.totalSteps - step) * (elapsedMin / step)))
-              : s.etaMinutes;
-          return { ...s, loss, step, series, etaMinutes: remain };
-        });
-      } else if (parsed.event === "mlx_train_completed") {
-        const finalLoss = typeof data.train_loss === "number" ? data.train_loss : stats.loss;
-        setStats((s) => ({ ...s, loss: finalLoss, step: s.totalSteps }));
+      if (ev.event === "training_completed" || ev.event === "job_finished") {
+        setDone(true);
       }
     };
 
     return () => es.close();
-  }, [jobId, userId, router, stats.loss]);
+  }, [jobId, userId]);
 
-  if (!jobId) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-[620px] items-center justify-center bg-white px-7">
-        <p className="text-[13px] text-neutral-500">no training in progress</p>
-      </main>
+  const handleContinue = () => {
+    router.push(
+      `/eval?job=${encodeURIComponent(jobId ?? "")}&user=${encodeURIComponent(userId)}`,
     );
-  }
+  };
 
-  if (done === "ok") {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-[620px] flex-col items-center justify-center bg-white px-7">
-        <h1 className="text-[32px] font-medium tracking-[-0.03em] text-neutral-900">
-          your model is ready.
-        </h1>
-      </main>
-    );
-  }
-
-  if (done === "fail") {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-[620px] flex-col items-center justify-center bg-white px-7">
-        <h1 className="text-[24px] font-medium tracking-[-0.02em] text-neutral-900">
-          training failed.
-        </h1>
-        <p className="mt-2 text-[14px] text-neutral-500">
-          see ~/.pmc-dev/storage/users/{userId}/audit.jsonl
-        </p>
-      </main>
-    );
-  }
-
-  return <TrainInProgress stats={stats} />;
+  return (
+    <TrainingScreen
+      prompt={FIXED_PROMPT}
+      samples={samples}
+      done={done}
+      onContinue={handleContinue}
+    />
+  );
 }
 
 export default function TrainPage() {
   return (
-    <Suspense fallback={<main className="min-h-screen bg-white" />}>
-      <TrainPageInner />
+    <Suspense fallback={<div className="min-h-screen w-full bg-background" />}>
+      <TrainInner />
     </Suspense>
   );
 }

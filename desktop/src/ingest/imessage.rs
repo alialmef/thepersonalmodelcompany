@@ -42,16 +42,21 @@ const QUERY: &str = r#"
 
 /// Decode the message text from an Apple typedstream `attributedBody` blob.
 ///
-/// The blob is an NSKeyedArchiver/typedstream-format NSAttributedString. The
-/// underlying NSString appears near the start, right after the "NSString"
-/// class marker. We don't need full attribute parsing — just the plain text.
+/// The blob wraps an NSAttributedString. The underlying NSString appears
+/// right after the "NSString" class marker in this exact layout:
 ///
-/// Heuristic format (works for macOS Ventura/Sonoma/Sequoia):
-///   ... NSString \x01\x94\x84\x01+ <len> <utf-8 bytes> ...
-/// where `<len>` is one of:
-///   - a single byte `n` in 0x01..0x7f      → length n
-///   - byte 0x81 then 2-byte LE u16         → length up to 65,535
-///   - byte 0x82 then 4-byte LE u32         → length up to ~4 GB
+///   NSString \x01 \x94|\x95 \x84 \x01 + <length-encoding> <utf-8 bytes>
+///
+/// where `+` (0x2b) is the typedstream `char` type code marking the start
+/// of the length-prefixed C-string field, and `<length-encoding>` is one of:
+///   - a single byte `n` in 0x01..0x7f  → length n
+///   - 0x81 then 2-byte LE u16          → length up to 65,535
+///   - 0x82 then 4-byte LE u32          → length up to ~4 GB
+///
+/// Earlier versions of this decoder scanned for *any* byte 0x01..0x7f after
+/// "NSString" as a candidate length, which made it latch onto the `+`
+/// separator (0x2b = 43) and over-read by one byte — every long message
+/// came out with a junk leading character.
 ///
 /// Returns the decoded text, or None if no plausible string is found.
 fn decode_attributed_body(blob: &[u8]) -> Option<String> {
@@ -62,43 +67,35 @@ fn decode_attributed_body(blob: &[u8]) -> Option<String> {
         .position(|w| w == marker)
     {
         let after = idx_search + rel + marker.len();
-        // After the class name there's a small variable preamble (typically
-        // 1-8 bytes of type tags like \x01\x94\x84\x01+). Scan a short
-        // window for the length sentinel that precedes the UTF-8 bytes.
-        for offset in 0..16usize {
-            let pos = after + offset;
-            if pos >= blob.len() {
-                break;
-            }
-            let b = blob[pos];
-            // Long string (0x81): 2-byte LE length follows.
-            if b == 0x81 && pos + 3 <= blob.len() {
-                let len = u16::from_le_bytes([blob[pos + 1], blob[pos + 2]]) as usize;
-                if let Some(s) = try_take_string(blob, pos + 3, len) {
-                    return Some(s);
-                }
-            }
-            // Very long string (0x82): 4-byte LE length.
-            if b == 0x82 && pos + 5 <= blob.len() {
-                let len = u32::from_le_bytes([
-                    blob[pos + 1],
-                    blob[pos + 2],
-                    blob[pos + 3],
-                    blob[pos + 4],
-                ]) as usize;
-                if len < 1_000_000 {
-                    if let Some(s) = try_take_string(blob, pos + 5, len) {
-                        return Some(s);
-                    }
-                }
-            }
-            // Short string: a length byte 1..0x7f immediately followed by UTF-8.
-            if b > 0 && b < 0x80 {
-                let len = b as usize;
-                if let Some(s) = try_take_string(blob, pos + 1, len) {
-                    // Reject class-name leakage (typedstream metadata).
-                    if !KNOWN_CLASS_NAMES.iter().any(|n| s.starts_with(n)) {
-                        return Some(s);
+        // The `+` (0x2b) separator that introduces the length encoding
+        // sits within ~8 bytes of the class-name end. Scan for it
+        // explicitly instead of treating any low byte as a length.
+        let window_end = (after + 12).min(blob.len());
+        if let Some(plus_rel) = blob[after..window_end].iter().position(|&b| b == 0x2b) {
+            let len_pos = after + plus_rel + 1;
+            if len_pos < blob.len() {
+                let b = blob[len_pos];
+                let parsed = if b == 0x81 && len_pos + 3 <= blob.len() {
+                    let n = u16::from_le_bytes([blob[len_pos + 1], blob[len_pos + 2]]) as usize;
+                    Some((len_pos + 3, n))
+                } else if b == 0x82 && len_pos + 5 <= blob.len() {
+                    let n = u32::from_le_bytes([
+                        blob[len_pos + 1],
+                        blob[len_pos + 2],
+                        blob[len_pos + 3],
+                        blob[len_pos + 4],
+                    ]) as usize;
+                    if n < 10_000_000 { Some((len_pos + 5, n)) } else { None }
+                } else if b > 0 && b < 0x80 {
+                    Some((len_pos + 1, b as usize))
+                } else {
+                    None
+                };
+                if let Some((str_start, str_len)) = parsed {
+                    if let Some(s) = try_take_string(blob, str_start, str_len) {
+                        if !KNOWN_CLASS_NAMES.iter().any(|n| s.starts_with(n)) {
+                            return Some(s);
+                        }
                     }
                 }
             }
@@ -370,6 +367,7 @@ mod tests {
             CREATE TABLE message (
                 ROWID INTEGER PRIMARY KEY,
                 text TEXT,
+                attributedBody BLOB,
                 is_from_me INTEGER,
                 date INTEGER,
                 handle_id INTEGER
@@ -440,6 +438,58 @@ mod tests {
     fn test_default_chat_db_path() {
         let p = default_chat_db_path().unwrap();
         assert!(p.ends_with("Library/Messages/chat.db"));
+    }
+
+    fn build_blob(prefix_byte_after_class: u8, length_encoding: &[u8], body: &[u8]) -> Vec<u8> {
+        // Minimal stand-in for the Apple typedstream layout we care about:
+        //   <padding> NSString <prefix_byte> \x84 \x01 + <length-encoding> <body>
+        // prefix_byte_after_class is the byte that varies per real blob
+        // (\x94 for short messages, \x95 for long ones, etc).
+        let mut blob = vec![0xaa; 16]; // arbitrary leading padding
+        blob.extend_from_slice(b"NSString");
+        blob.push(0x01);
+        blob.push(prefix_byte_after_class);
+        blob.push(0x84);
+        blob.push(0x01);
+        blob.push(0x2b); // '+'
+        blob.extend_from_slice(length_encoding);
+        blob.extend_from_slice(body);
+        blob.extend_from_slice(b"\x86\x84\x02iI"); // trailing metadata
+        blob
+    }
+
+    #[test]
+    fn test_decode_attributed_body_short() {
+        // 22-char string, length fits in one byte.
+        let body = b"what are YOU doing up ";
+        let blob = build_blob(0x94, &[body.len() as u8], body);
+        let s = decode_attributed_body(&blob).expect("decoder should find string");
+        assert_eq!(s, "what are YOU doing up ");
+    }
+
+    #[test]
+    fn test_decode_attributed_body_no_leading_byte_when_length_is_43() {
+        // Regression test: a 43-char message has length byte 0x2b ('+'). The
+        // old decoder picked the SEPARATOR `+` as the length and over-read
+        // by one byte, prepending a junk character. Verify clean decode.
+        let body = b"Accept slack invite when you get the chance"; // 43 chars
+        assert_eq!(body.len(), 43);
+        let blob = build_blob(0x94, &[0x2b], body);
+        let s = decode_attributed_body(&blob).expect("decoder should find string");
+        assert_eq!(s, "Accept slack invite when you get the chance");
+    }
+
+    #[test]
+    fn test_decode_attributed_body_long() {
+        // 281-char string uses the 0x81 <u16 LE> encoding.
+        let body_str: String = "x".repeat(281);
+        let body = body_str.as_bytes();
+        let len_bytes = (body.len() as u16).to_le_bytes();
+        let mut len_enc = vec![0x81];
+        len_enc.extend_from_slice(&len_bytes);
+        let blob = build_blob(0x95, &len_enc, body);
+        let s = decode_attributed_body(&blob).expect("decoder should find string");
+        assert_eq!(s.len(), 281);
     }
 
     #[test]

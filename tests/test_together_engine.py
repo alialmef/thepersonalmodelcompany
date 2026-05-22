@@ -16,6 +16,7 @@ from pmc.serve.engine_together import (
     DEFAULT_BASE_URL,
     TogetherEngine,
     set_together_adapter_id,
+    set_together_output_model,
 )
 from pmc.serve.registry import AdapterRecord
 
@@ -103,6 +104,7 @@ def test_chat_without_adapter_id_skips_lora():
     """A record with no together_adapter_id should not pass a lora field."""
     engine = TogetherEngine(api_key="k")
     record = _record(with_adapter_id=False)
+    record.metadata["provider"] = "together"
     fake_client = MagicMock()
     fake_client.chat.completions.create.return_value = _mock_openai_response("hi")
     engine._client = fake_client
@@ -110,6 +112,22 @@ def test_chat_without_adapter_id_skips_lora():
     engine.chat(record=record, messages=[{"role": "user", "content": "x"}])
     call_kwargs = fake_client.chat.completions.create.call_args.kwargs
     assert "extra_body" not in call_kwargs or "lora" not in call_kwargs.get("extra_body", {})
+    assert not engine.allows_base_model("other/base", record)
+
+
+def test_chat_uses_together_output_model_directly():
+    engine = TogetherEngine(api_key="k")
+    record = _record(with_adapter_id=False)
+    set_together_output_model(record, "ft:pmc-alex")
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = _mock_openai_response("hi")
+    engine._client = fake_client
+
+    engine.chat(record=record, messages=[{"role": "user", "content": "x"}])
+    call_kwargs = fake_client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["model"] == "ft:pmc-alex"
+    assert "extra_body" not in call_kwargs
+    assert engine.allows_base_model("moonshotai/Kimi-K2-Instruct-0905", record)
 
 
 def test_chat_stream_yields_content_chunks():
@@ -159,7 +177,28 @@ def test_set_together_adapter_id_helper():
     record = AdapterRecord(user_id="u", adapter_dir="/x", base_model=DEFAULT_BASE_MODEL)
     assert record.metadata == {}
     set_together_adapter_id(record, "adapter-xyz")
+    assert record.metadata["provider"] == "together"
     assert record.metadata["together_adapter_id"] == "adapter-xyz"
+
+
+def test_adapter_id_uses_recorded_together_base_model():
+    engine = TogetherEngine(api_key="k")
+    record = _record()
+    record.metadata["together_base_model"] = "moonshotai/Kimi-K2-Instruct-0905"
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = _mock_openai_response("hi")
+    engine._client = fake_client
+
+    engine.chat(record=record, messages=[{"role": "user", "content": "x"}])
+    call_kwargs = fake_client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["model"] == "moonshotai/Kimi-K2-Instruct-0905"
+
+
+def test_set_together_output_model_helper():
+    record = AdapterRecord(user_id="u", adapter_dir="/x", base_model="remote/base")
+    set_together_output_model(record, "ft:u")
+    assert record.metadata["provider"] == "together"
+    assert record.metadata["together_output_model"] == "ft:u"
 
 
 def test_upload_adapter_not_yet_implemented():

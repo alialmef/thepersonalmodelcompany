@@ -6,7 +6,8 @@ from pmc.storage.artifact_store import (
     RunSummary,
     new_run_id,
 )
-from pmc.storage.audit import AuditEvent, AuditLog, KNOWN_STAGES
+from pmc.storage.action_store import ActionStore
+from pmc.storage.audit import KNOWN_STAGES, AuditEvent, AuditLog
 from pmc.storage.deletion import (
     DeletionManager,
     DeletionResult,
@@ -21,9 +22,11 @@ from pmc.storage.founders import (
 )
 from pmc.storage.paths import StoragePaths, safe_id
 from pmc.storage.user_store import UserStore
+from pmc.storage.verification_store import VerificationStore
 
 __all__ = [
     "ActivePointer",
+    "ActionStore",
     "ArtifactStore",
     "AuditEvent",
     "AuditLog",
@@ -39,6 +42,7 @@ __all__ = [
     "StoragePaths",
     "Tombstone",
     "UserStore",
+    "VerificationStore",
     "new_run_id",
     "safe_id",
 ]

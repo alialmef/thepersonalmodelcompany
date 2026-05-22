@@ -69,6 +69,24 @@ class TrainingConfig(BaseModel):
     output_dir: str = ""
     seed: int = 42
 
+    # Cost-control levers used by remote (Together) trainers. Local
+    # trainers ignore these. Defaults are the "legendary recipe":
+    #   - cap each example at 2k tokens so voice signal isn't drowned in context
+    #   - subsample to 1,500 highest-importance examples
+    # See pmc/train/together_trainer.py for the rationale.
+    max_tokens_per_example: int = 2000
+    max_examples: int = 1500
+
+    # Convenience accessors for the Together trainer; mirror adapter
+    # config so the trainer doesn't have to dig into nested objects.
+    @property
+    def lora_r(self) -> int:
+        return self.adapter.rank
+
+    @property
+    def lora_alpha(self) -> int:
+        return self.adapter.alpha
+
     @classmethod
     def from_spec(
         cls,

@@ -4,7 +4,22 @@ version = "0.1.0"
 description = "Personal Model Company — train personal AI models from your own data"
 requires-python = ">=3.12"
 dependencies = [
+    # Core schema layer used everywhere
     "pydantic>=2.7",
+    # API surface — `python -m pmc.serve` boots a uvicorn/fastapi app
+    # against any engine. These aren't optional in practice; the
+    # `[serve]` extra used to gate them but Railway / production
+    # deploys broke when they weren't installed by default.
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
+    # LLM clients — Anthropic for memory consolidation + the curate /
+    # memory / deploy supervisors; OpenAI client for the
+    # OpenAI-compatible Together AI inference + Together-hosted
+    # custom models. Required at backend boot whenever TogetherEngine
+    # is the inference engine or supervisors run.
+    "anthropic>=0.25",
+    "openai>=1.30",
 ]
 
 [project.scripts]
@@ -27,16 +42,13 @@ train = [
     "bitsandbytes>=0.43",
     "accelerate>=0.30",
 ]
-eval = [
-    "anthropic>=0.25",
-    "openai>=1.30",
-]
-serve = [
-    "fastapi>=0.111",
-    "uvicorn>=0.30",
-    "openai>=1.30",  # OpenAI client also used for Together AI (OpenAI-compatible API)
-    "python-multipart>=0.0.9",  # FastAPI multipart/form-data for file uploads
-]
+# NOTE: `eval` and `serve` used to gate the LLM clients + uvicorn / fastapi.
+# Those moved into the base `dependencies` block above because every
+# production deploy needed them and the optional gating just broke things.
+# Kept here as empty markers so existing `pip install pmc[serve]` /
+# `pip install pmc[eval]` commands and metadata don't error out.
+eval = []
+serve = []
 serve-gpu = [
     "pmc[serve]",
     "vllm>=0.5",

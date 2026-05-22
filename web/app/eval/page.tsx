@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-import EvalScreen from "@/components/app/eval-screen";
+import EvalScreen, { type EvalFlag } from "@/components/app/eval-screen";
+import {
+  getEvalPrompts,
+  promoteRun,
+  submitEvalJudgment,
+  type EvalPrompt,
+  type TrustReport,
+} from "@/lib/api/client";
 import { useUser } from "@/hooks/use-user";
 
 const PMC_API_URL =
@@ -11,108 +18,249 @@ const PMC_API_URL =
   process.env.NEXT_PUBLIC_API_URL ??
   "http://localhost:8000";
 
-/**
- * Act 3.5 — the eval round. Shown the moment training completes.
- *
- * Wraps the designed <EvalScreen>. Two backend roles:
- *
- *  1. Fetch 5 grounded situations + the model's response for each:
- *       GET /v1/users/{id}/eval/prompts
- *
- *  2. Persist each judgment (accept / reject / edit + optional reason):
- *       POST /v1/users/{id}/eval/judgments
- *
- *     These judgments are DPO-grade preference data — they become training
- *     signal for the next retrain. We don't block the UI on the POST.
- *
- * On completion, /first-meeting takes over with the ceremonial arrival.
- */
-interface EvalRound {
-  id: string;
-  situation: string;
-  response: string;
+interface AuditEvent {
+  timestamp?: string;
+  stage?: string;
+  event?: string;
+  data?: Record<string, unknown>;
+  result?: {
+    run_id?: string | null;
+    status?: string;
+  } | null;
 }
 
-export default function EvalPage() {
+type Verdict = "approve" | "reject" | "edit" | "not_me" | "private";
+
+function EvalInner() {
   const router = useRouter();
-  const [rounds, setRounds] = useState<EvalRound[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [exiting, setExiting] = useState(false);
+  const searchParams = useSearchParams();
+  const jobId = searchParams.get("job");
   const { user } = useUser();
-  const userId = user?.pmcUserId ?? "";
+  const userId = searchParams.get("user") ?? user?.pmcUserId ?? "";
+
+  const [ready, setReady] = useState(false);
+  const [flags, setFlags] = useState<EvalFlag[]>([]);
+  const [summary, setSummary] = useState<string | undefined>(undefined);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [prompts, setPrompts] = useState<EvalPrompt[]>([]);
+  const [trustReport, setTrustReport] = useState<TrustReport | undefined>(undefined);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [draft, setDraft] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const seenRef = useRef<Set<string>>(new Set());
+  const loadedPromptsFor = useRef<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    fetch(
-      `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/eval/prompts`,
-    )
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as { prompts: EvalRound[] };
-        if (!cancelled) setRounds(data.prompts);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
+    if (!jobId) {
+      setReady(true);
+      return;
+    }
+    if (!userId) return;
+    const url = `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/runs/${encodeURIComponent(jobId)}/events`;
+    const es = new EventSource(url);
+
+    es.onmessage = (msg) => {
+      if (msg.data === "[DONE]") {
+        es.close();
+        return;
+      }
+      let ev: AuditEvent;
+      try {
+        ev = JSON.parse(msg.data) as AuditEvent;
+      } catch {
+        return;
+      }
+
+      if (ev.event === "curate_supervisor_report" && ev.data) {
+        const flagsIn =
+          (ev.data.flags as
+            | Array<{ decision?: string; reason?: string; index?: number }>
+            | undefined) ?? [];
+        for (const f of flagsIn) {
+          const key = `curate:${f.index ?? ""}:${f.decision ?? ""}`;
+          if (seenRef.current.has(key)) continue;
+          seenRef.current.add(key);
+          setFlags((prev) => [
+            ...prev,
+            {
+              category: "curate",
+              decision: f.decision ?? "flagged",
+              reason: f.reason,
+            },
+          ]);
+        }
+      }
+
+      if (ev.event === "memory_supervisor_report" && ev.data) {
+        const flagsIn =
+          (ev.data.flags as
+            | Array<{ episode_id?: string; decision?: string; reason?: string }>
+            | undefined) ?? [];
+        for (const f of flagsIn) {
+          const key = `memory:${f.episode_id ?? ""}:${f.decision ?? ""}`;
+          if (seenRef.current.has(key)) continue;
+          seenRef.current.add(key);
+          setFlags((prev) => [
+            ...prev,
+            {
+              category: "memory",
+              decision: f.decision ?? "flagged",
+              reason: f.reason,
+            },
+          ]);
+        }
+      }
+
+      if (ev.event === "deploy_supervisor_report" && ev.data) {
+        const sum = ev.data.summary as string | undefined;
+        const issuesIn =
+          (ev.data.issues as
+            | Array<{ kind?: string; note?: string; prompt_index?: number }>
+            | undefined) ?? [];
+        if (sum) setSummary(sum);
+        for (const i of issuesIn) {
+          const key = `deploy:${i.prompt_index ?? ""}:${i.kind ?? ""}`;
+          if (seenRef.current.has(key)) continue;
+          seenRef.current.add(key);
+          setFlags((prev) => [
+            ...prev,
+            {
+              category: "deploy",
+              decision: i.kind ?? "issue",
+              reason: i.note,
+            },
+          ]);
+        }
+        setReady(true);
+        return;
+      }
+
+      if (ev.event === "job_finished") {
+        if (ev.result?.run_id) setRunId(ev.result.run_id);
+        setReady(true);
+      }
+
+      if (ev.event === "adapter_deployed") {
+        setReady(true);
+      }
     };
-  }, [userId]);
 
-  // Fire-and-forget judgment POST. Failure shouldn't slow the user down —
-  // the next retrain just doesn't get this signal.
-  function persistJudgment(
-    promptId: string,
-    verdict: "accept" | "reject" | "edit",
-    extra?: { editedText?: string; reason?: string },
-  ) {
-    fetch(
-      `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/eval/judgments`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ promptId, verdict, ...extra }),
-        keepalive: true,
-      },
-    ).catch(() => {
-      /* best-effort */
-    });
+    es.onerror = () => {
+      setReady(true);
+      es.close();
+    };
+
+    return () => es.close();
+  }, [jobId, userId]);
+
+  useEffect(() => {
+    if (!ready || !userId) return;
+    if (loadedPromptsFor.current === userId) return;
+    loadedPromptsFor.current = userId;
+    setError(undefined);
+    getEvalPrompts(userId)
+      .then((body) => {
+        setPrompts(body.prompts);
+        setTrustReport(body.trust_report);
+        setCurrentIndex(0);
+        setDraft(body.prompts[0]?.response ?? "");
+      })
+      .catch((err: unknown) => {
+        loadedPromptsFor.current = null;
+        setError(err instanceof Error ? err.message : "Failed to load private checks");
+      });
+  }, [ready, userId]);
+
+  useEffect(() => {
+    setDraft(prompts[currentIndex]?.response ?? "");
+  }, [currentIndex, prompts]);
+
+  const completed = prompts.length > 0 && currentIndex >= prompts.length;
+
+  async function record(verdict: Verdict) {
+    const prompt = prompts[currentIndex];
+    if (!prompt || !userId) return;
+    const candidate = prompt.candidates[0];
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      const editedText = verdict === "edit" ? draft.trim() : undefined;
+      const response = await submitEvalJudgment({
+        userId,
+        probeId: prompt.id,
+        verdict,
+        chosenCandidateId: candidate?.id,
+        editedText,
+        dimension: prompt.kind === "voice" ? "voice" : "overall",
+      });
+      setTrustReport(response.trust_report);
+      setCurrentIndex((idx) => idx + 1);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save judgment");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function onComplete() {
-    // Play the swirl-out, then route to /first-meeting.
-    setExiting(true);
-    setTimeout(() => router.push(`/first-meeting?user=${encodeURIComponent(userId)}`), 600);
-  }
+  // The /eval flow IS the first meeting now. Verification + first
+  // meeting collapsed into one screen — the model demonstrates voice
+  // across situations, the user decides if it lands, and that
+  // judgement is the relationship's foundation. After promotion the
+  // user goes straight into /chat with the trained adapter.
+  const goNext = () => {
+    router.push(`/chat`);
+  };
 
-  if (error) {
-    return (
-      <main className="mx-auto min-h-screen max-w-[560px] bg-white px-7 pt-11 pb-12">
-        <p className="text-[14px] text-neutral-600">
-          Couldn&apos;t load eval prompts: {error}. The backend may be down —
-          check{" "}
-          <code className="font-mono text-[12px]">./scripts/dev.sh</code>.
-        </p>
-      </main>
-    );
-  }
-
-  if (!rounds) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-[560px] items-center justify-center bg-white">
-        <div className="text-[13px] text-neutral-500">preparing…</div>
-      </main>
-    );
+  async function handleContinue() {
+    if (!userId) return;
+    if (!runId) {
+      goNext();
+      return;
+    }
+    setPromoting(true);
+    setError(undefined);
+    try {
+      const response = await promoteRun(userId, runId);
+      setTrustReport(response.trust_report);
+      goNext();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Private verification is not ready");
+    } finally {
+      setPromoting(false);
+    }
   }
 
   return (
-    <div className={exiting ? "pmc-eval-exit" : undefined}>
-      <EvalScreen
-        rounds={rounds}
-        onJudge={persistJudgment}
-        onComplete={onComplete}
-      />
-    </div>
+    <EvalScreen
+      ready={ready}
+      flags={flags}
+      summary={summary}
+      prompts={prompts}
+      currentIndex={currentIndex}
+      draft={draft}
+      completed={completed}
+      submitting={submitting}
+      promoting={promoting}
+      error={error}
+      trustReport={trustReport}
+      onDraftChange={setDraft}
+      onApprove={() => record("approve")}
+      onSaveEdit={() => record("edit")}
+      onNotMe={() => record("not_me")}
+      onPrivate={() => record("private")}
+      onContinue={handleContinue}
+      onFixLater={goNext}
+    />
   );
 }
+
+export default function EvalPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen w-full bg-background" />}>
+      <EvalInner />
+    </Suspense>
+  );
+}
+

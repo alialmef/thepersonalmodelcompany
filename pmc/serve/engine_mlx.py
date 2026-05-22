@@ -16,7 +16,6 @@ Memory footprint with Llama 3.2 3B 4-bit on M4 Pro: ~3 GB resident.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
