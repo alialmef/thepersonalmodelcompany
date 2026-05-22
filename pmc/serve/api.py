@@ -67,6 +67,16 @@ def create_app(
             allow_headers=["*"],
         )
 
+    # Auth — email-anchored accounts + session tokens. The store is
+    # attached to app.state so the FastAPI dependency in
+    # pmc.auth.middleware can pick it up without globals. Always
+    # mounted when storage_root is configured; in tests / sub-app
+    # mode the caller can attach their own store before include_router.
+    if storage_root is not None:
+        from pmc.auth import AuthStore, auth_router
+        app.state.auth_store = AuthStore(storage_root=Path(storage_root))
+        app.include_router(auth_router)
+
     # ----- health + chat completions (no storage_root needed) -----
 
     @app.get("/healthz")

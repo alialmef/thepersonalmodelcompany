@@ -85,9 +85,23 @@ export default function WelcomePage() {
     window.location.replace("/welcome");
   };
 
+  // Where Begin goes:
+  //   - if the user is already signed in OR has a session token,
+  //     skip /sign-in and go straight to /connect
+  //   - otherwise route to /sign-in first
+  const beginTarget = (() => {
+    try {
+      if (typeof window === "undefined") return "/sign-in";
+      const token = window.localStorage.getItem("pmc.sessionToken");
+      return token ? "/connect" : "/sign-in";
+    } catch {
+      return "/sign-in";
+    }
+  })();
+
   return (
     <>
-      <FirstLaunchScreen onBegin={() => router.push("/connect")} />
+      <FirstLaunchScreen onBegin={() => router.push(beginTarget)} />
       {hasExistingData && (
         <button
           type="button"
