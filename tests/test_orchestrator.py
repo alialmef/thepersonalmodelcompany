@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -13,13 +12,11 @@ from pmc.ingest.base import RawItem
 from pmc.orchestrator import (
     DataSource,
     DataSourceKind,
-    Job,
     JobScheduler,
     JobStatus,
     Monitor,
     PMCPipeline,
     PipelineConfig,
-    PipelineResult,
     raw_source,
     text_source,
 )
@@ -33,11 +30,22 @@ from pmc.schema.conversation import (
     SourceType,
 )
 from pmc.schema.training import TrainingConfig
+from pmc.schema.verification import (
+    ActionDecision,
+    ActionTrace,
+    CandidateOrigin,
+    JudgmentVerdict,
+    PersonalProbe,
+    ProbeCandidate,
+    ProbeKind,
+    UserJudgment,
+)
 from pmc.serve.registry import AdapterRegistry
 from pmc.storage.artifact_store import ArtifactStore
 from pmc.storage.audit import AuditLog
 from pmc.storage.deletion import DeletionManager, DeletionScope
 from pmc.storage.user_store import UserStore
+from pmc.storage.verification_store import VerificationStore
 from pmc.train.config import SFTRunResult
 
 
@@ -282,6 +290,110 @@ def test_stage_train_smart_epochs(tmp_path: Path):
     plan_small, _ = pipeline.stage_train(config, small, [])
     # Effective batch size = 16, 100 examples, 3 epochs (smart) → ceil(100/16)*3 = 21
     assert plan_small.estimated_steps >= 18
+
+
+def test_stage_train_includes_verification_feedback(tmp_path: Path):
+    pipeline, store, *_rest, audit, _deletion, _registry = _make_pipeline(tmp_path)
+    verification = VerificationStore(store.paths.root)
+    probe = PersonalProbe(
+        user_id="alice",
+        kind=ProbeKind.VOICE,
+        prompt=[Message(role=Role.USER, content="free thursday?")],
+        candidates=[
+            ProbeCandidate(
+                id="cand-model",
+                origin=CandidateOrigin.PERSONAL_MODEL,
+                text="Sounds good, Thursday works.",
+            )
+        ],
+    )
+    verification.save_probes("alice", [probe])
+    verification.append_judgment(
+        "alice",
+        UserJudgment(
+            user_id="alice",
+            probe_id=probe.id,
+            verdict=JudgmentVerdict.EDIT,
+            chosen_candidate_id="cand-model",
+            edited_text="yeah thursday works",
+            dimension="voice",
+        ),
+    )
+    verification.append_action_trace(
+        "alice",
+        ActionTrace(
+            user_id="alice",
+            surface="messages",
+            operation="draft_reply",
+            proposed_text="yeah thursday works",
+            decision=ActionDecision.APPROVED,
+        ),
+    )
+
+    train = [
+        Completion(
+            conversation=Conversation(messages=[Message(role=Role.USER, content=f"Q{i}")]),
+            candidates=[
+                CompletionCandidate(
+                    messages=[Message(role=Role.ASSISTANT, content=f"A{i} much longer answer")]
+                )
+            ],
+        )
+        for i in range(15)
+    ]
+    config = PipelineConfig(user_id="alice", data_sources=[])
+    _plan, result = pipeline.stage_train(config, train, [])
+
+    assert result is not None
+    assert result.num_train_examples == 17
+    events = audit.events("alice", stage="train")
+    attached = [e for e in events if e.event == "verification_signal_attached"]
+    assert attached
+    assert attached[0].data["total_completions"] == 2
+
+
+def test_pipeline_persists_holdout_split_for_private_eval(tmp_path: Path):
+    pipeline, store, *_ = _make_pipeline(tmp_path)
+    config = PipelineConfig(
+        user_id="alice",
+        data_sources=[raw_source(_good_raw_items(25))],
+        holdout_fraction=0.2,
+        skip_eval=True,
+        skip_deploy=True,
+    )
+    result = pipeline.run(config)
+
+    assert result.status == "completed"
+    assert result.dataset_version is not None
+    holdout = store.load_holdout("alice", result.dataset_version)
+    train = store.load_curated_dataset("alice", result.dataset_version)
+    assert len(holdout) > 0
+    assert len(train) + len(holdout) == result.completions_curated
+
+
+def test_verification_gate_blocks_unproven_model(tmp_path: Path):
+    pipeline, *_ = _make_pipeline(tmp_path)
+    config = PipelineConfig(user_id="alice", require_verification_to_deploy=True)
+
+    decision = pipeline.stage_verification_gate(config)
+
+    assert decision.deploy is False
+    assert "personal verification" in decision.reason
+
+
+def test_pipeline_blocks_deploy_when_private_verification_missing(tmp_path: Path):
+    pipeline, *_ = _make_pipeline(tmp_path)
+    config = PipelineConfig(
+        user_id="alice",
+        data_sources=[raw_source(_good_raw_items(20))],
+        skip_eval=True,
+        require_verification_to_deploy=True,
+    )
+    result = pipeline.run(config)
+
+    assert result.status == "blocked"
+    assert result.deployed is False
+    assert "personal verification" in result.notes
 
 
 # ---------- Full pipeline.run() ----------

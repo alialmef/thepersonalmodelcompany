@@ -33,6 +33,11 @@ urlencoding = "2"
 [dev-dependencies]
 tempfile = "3"
 
+# Dev CLIs live in examples/ rather than src/bin/. Tauri's bundler scans
+# [[bin]] / src/bin/ entries and tries to ship every binary inside the
+# .app — examples/ is invisible to it. Run with:
+#   cargo run --example test_imessage --release
+
 [profile.release]
 panic = "abort"
 codegen-units = 1

@@ -13,9 +13,20 @@ reproducible until explicitly cleaned up.
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from collections.abc import Iterable, Iterator
 from pathlib import Path
+
+# Pre-fix native ingesters generated source_ids like
+# "imessage-20260521-181322" — a new timestamped file on every Connect
+# click, so the raw/ dir accumulated duplicates and the curate stage
+# re-processed the same content N times. Native ingesters now send
+# stable per-kind ids ("imessage", "notes", "email") that overwrite a
+# single canonical file. When a stable id writes, any legacy timestamped
+# sibling for the same kind is removed — quietly migrating pre-fix
+# users on their next ingest.
+_LEGACY_TIMESTAMP_SUFFIX = re.compile(r"^-\d{8}-\d{6}$")
 
 from pmc.ingest.base import RawItem
 from pmc.schema.conversation import Completion
@@ -58,6 +69,8 @@ class UserStore:
         add to an existing source file."""
         path = self.paths.raw_file(user_id, source_id)
         path.parent.mkdir(parents=True, exist_ok=True)
+        if not append:
+            self._drop_legacy_timestamped_siblings(user_id, source_id)
         mode = "a" if append and path.is_file() else "w"
         count = 0
         with path.open(mode, encoding="utf-8") as f:
@@ -65,6 +78,22 @@ class UserStore:
                 f.write(item.model_dump_json() + "\n")
                 count += 1
         return count
+
+    def _drop_legacy_timestamped_siblings(self, user_id: str, source_id: str) -> None:
+        # Only fires when the caller is using a modern stable id (no
+        # embedded timestamp). For a legacy id like "imessage-2026...",
+        # the suffix check would match itself and self-delete — guard
+        # against that by skipping ids that already look legacy.
+        if _LEGACY_TIMESTAMP_SUFFIX.search(source_id):
+            return
+        raw_dir = self.paths.raw_dir(user_id)
+        if not raw_dir.is_dir():
+            return
+        prefix = f"{source_id}-"
+        for sibling in raw_dir.glob(f"{source_id}-*.jsonl"):
+            suffix = sibling.stem[len(prefix) - 1 :]  # keep leading dash
+            if _LEGACY_TIMESTAMP_SUFFIX.match(suffix):
+                sibling.unlink(missing_ok=True)
 
     def load_raw_items(
         self,

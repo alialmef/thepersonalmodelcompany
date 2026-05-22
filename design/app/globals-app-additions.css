@@ -1,0 +1,187 @@
+/* =========================================================================
+   PMC App Screens — additions to globals.css
+   =========================================================================
+   Append this to the project's existing web/app/globals.css (after the
+   landing-page additions). All animations are gated behind
+   `prefers-reduced-motion: no-preference` — users with reduced motion
+   preferences see final states immediately, no animation.
+   ========================================================================= */
+
+@media (prefers-reduced-motion: no-preference) {
+
+  /* -----------------------------------------------------------------------
+     Universal helpers (shared across screens)
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-app-simple-fade {
+    to { opacity: 1; }
+  }
+
+  @keyframes pmc-app-fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pmc-app-letter-arrive {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Used everywhere for simple opacity entries; pair with inline
+     animation-delay to choreograph cascades. */
+  .pmc-anim-fade {
+    opacity: 0;
+    animation: pmc-app-simple-fade 0.5s ease forwards;
+  }
+
+  .pmc-anim-fade-up {
+    opacity: 0;
+    transform: translateY(6px);
+    animation: pmc-app-fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  /* Letter-cascade primitive used by <LetterCascade>. The per-letter
+     animation-delay is set inline via the component. */
+  .pmc-letter {
+    display: inline-block;
+    opacity: 0;
+    transform: translateY(4px);
+    animation: pmc-app-letter-arrive 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+
+  /* -----------------------------------------------------------------------
+     Brand mark — the red-dot heartbeat
+     -----------------------------------------------------------------------
+     The dot lives in the center of the mark and pulses on a 2.6s cycle.
+     This is the visual signature that the user's model is "alive" — it
+     appears on every in-app screen from the download page forward.
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-dot-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.45; }
+  }
+
+  .pmc-mark-dot {
+    transform-origin: center;
+    transform-box: fill-box;
+    animation: pmc-dot-pulse 2.6s ease-in-out infinite;
+  }
+
+
+  /* -----------------------------------------------------------------------
+     Download page (web)
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-mark-scale-in {
+    from { opacity: 0; transform: scale(0.92); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  @keyframes pmc-dot-appear {
+    0%   { opacity: 0; transform: scale(0); }
+    60%  { opacity: 1; transform: scale(1.3); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  .pmc-dl-mark {
+    opacity: 0;
+    transform-origin: center;
+    transform-box: fill-box;
+    animation: pmc-mark-scale-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards;
+  }
+
+  .pmc-dl-dot {
+    opacity: 0;
+    transform-origin: center;
+    transform-box: fill-box;
+    animation:
+      pmc-dot-appear 0.5s cubic-bezier(0.16, 1, 0.3, 1) 1.2s forwards,
+      pmc-dot-pulse 2.6s ease-in-out 2.0s infinite;
+  }
+
+
+  /* -----------------------------------------------------------------------
+     First-launch screen (Mac app)
+     -----------------------------------------------------------------------
+     IMPORTANT: the long pause between "Hello." (2.8s) and the second line
+     (5.5s) is deliberate. Three seconds of held silence. Do not shorten.
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-hello-arrive {
+    from { opacity: 0; transform: scale(0.96); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  .pmc-fl-mark {
+    opacity: 0;
+    transform-origin: center;
+    transform-box: fill-box;
+    animation: pmc-mark-scale-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.6s forwards;
+  }
+
+  .pmc-fl-dot {
+    opacity: 0;
+    transform-origin: center;
+    transform-box: fill-box;
+    animation:
+      pmc-dot-appear 0.5s cubic-bezier(0.16, 1, 0.3, 1) 1.7s forwards,
+      pmc-dot-pulse 2.6s ease-in-out 2.5s infinite;
+  }
+
+  .pmc-fl-hello {
+    opacity: 0;
+    transform: scale(0.96);
+    animation: pmc-hello-arrive 0.7s cubic-bezier(0.16, 1, 0.3, 1) 2.8s forwards;
+  }
+
+
+  /* -----------------------------------------------------------------------
+     Train screen — loss curve
+     -----------------------------------------------------------------------
+     The loss curve draws itself in via stroke-dashoffset on first mount.
+     For subsequent updates as new datapoints arrive, the path simply
+     re-renders without animation. If you want the dramatic draw-in to
+     only happen on first paint, attach a `key` derived from a
+     "has-rendered-once" boolean rather than series.length.
+     ----------------------------------------------------------------------- */
+
+  @keyframes pmc-loss-draw {
+    to { stroke-dashoffset: 0; }
+  }
+
+  .pmc-loss-path {
+    stroke-dasharray: 600;
+    stroke-dashoffset: 600;
+    animation: pmc-loss-draw 6.0s cubic-bezier(0.22, 1, 0.36, 1) 0.8s forwards;
+  }
+
+  .pmc-loss-grid {
+    stroke: rgba(29, 29, 31, 0.06);
+    stroke-width: 0.5;
+  }
+}
+
+
+/* =========================================================================
+   Reduced motion: ensure the loss-grid is still styled even when the
+   animation gate above is off, and the mark dot is visible (just not
+   pulsing). These rules live outside the @media block so they always
+   apply.
+   ========================================================================= */
+
+.pmc-loss-grid {
+  stroke: rgba(29, 29, 31, 0.06);
+  stroke-width: 0.5;
+}
+
+.pmc-loss-path {
+  /* Default visible state for reduced motion */
+}
+
+.pmc-mark-dot,
+.pmc-dl-dot,
+.pmc-fl-dot {
+  /* Without animation gate, these are visible static red dots. */
+  fill: #FF3B30;
+}

@@ -78,15 +78,93 @@ def create_app(
             "storage_enabled": storage_root is not None,
         }
 
+    @app.get("/v1/runtime/capabilities")
+    def runtime_capabilities() -> dict[str, Any]:
+        """Report configured providers without exposing secrets."""
+        import os
+
+        forced_trainer = os.environ.get("PMC_TRAINER", "").strip().lower()
+        together_key_present = bool(os.environ.get("TOGETHER_API_KEY"))
+        openai_key_present = bool(os.environ.get("OPENAI_API_KEY"))
+        anthropic_key_present = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        try:
+            from pmc.orchestrator.pipeline import _mlx_available
+            mlx_available = _mlx_available()
+        except Exception:
+            mlx_available = False
+
+        if forced_trainer:
+            training_provider = forced_trainer
+        elif together_key_present:
+            training_provider = "together"
+        elif mlx_available:
+            training_provider = "mlx"
+        else:
+            training_provider = "hf"
+
+        training_available = True
+        unavailable_reason = None
+        if training_provider == "together" and not together_key_present:
+            training_available = False
+            unavailable_reason = "TOGETHER_API_KEY is not set"
+        elif training_provider == "mlx" and not mlx_available:
+            training_available = False
+            unavailable_reason = "MLX is not installed"
+
+        engine_name = type(server.engine).__name__
+        if engine_name == "TogetherEngine":
+            inference_provider = "together"
+        elif engine_name == "MLXEngine":
+            inference_provider = "mlx"
+        elif engine_name == "MockEngine":
+            inference_provider = "mock"
+        else:
+            inference_provider = engine_name
+
+        return {
+            "training": {
+                "provider": training_provider,
+                "forced": forced_trainer or None,
+                "available": training_available,
+                "unavailable_reason": unavailable_reason,
+                "together_key_present": together_key_present,
+                "mlx_available": mlx_available,
+            },
+            "inference": {
+                "provider": inference_provider,
+                "engine": engine_name,
+                "base_model": server.engine.base_model,
+            },
+            "memory": {
+                "openai_key_present": openai_key_present,
+            },
+            "supervision": {
+                "anthropic_key_present": anthropic_key_present,
+            },
+        }
+
     @app.post("/v1/chat/completions")
     def chat_completions(request: ChatCompletionRequest) -> Any:
+        # Inject retrieved memory before handing the request to the
+        # engine. If the user has a recall.db, the latest user message
+        # becomes a retrieval query; the top fragments get prepended
+        # as a system block. If memory is unavailable or empty the
+        # request passes through unchanged. Memory is a boost, never
+        # a gate — never block inference here.
+        if storage_root is not None:
+            try:
+                from pmc.memory.recall.inject import inject_memory
+                request = inject_memory(request, Path(storage_root))
+            except Exception:
+                pass
+
         if request.stream:
             # Pre-validate before the streaming generator starts — errors raised
             # mid-iteration become 500s, not the 404/400 they should be.
             user_id = request.user or request.model
             try:
                 record = server.registry.require(user_id)
-                if record.base_model != server.engine.base_model:
+                if not server._engine_accepts(record):
                     raise ValueError(
                         f"Adapter for {user_id!r} expects base "
                         f"{record.base_model!r}, engine is serving "
@@ -170,21 +248,48 @@ def create_app(
         import asyncio
         import json as _json
 
+        from pmc.actions.registry import build_default_action_registry
         from pmc.orchestrator.data_source import DataSourceKind
         from pmc.orchestrator.monitor import Monitor
         from pmc.orchestrator.pipeline import PMCPipeline, PipelineConfig
         from pmc.orchestrator.scheduler import JobScheduler, JobStatus
+        from pmc.actions.service import ActionService
         from pmc.schema.base_models import ModelTier, list_specs, spec_for_tier
+        from pmc.schema.conversation import Message, Role
+        from pmc.schema.verification import (
+            CandidateOrigin,
+            JudgmentVerdict,
+            PersonalProbe,
+            ProbeCandidate,
+            ProbeKind,
+            UserJudgment,
+        )
+        from pmc.serve.routes.actions import build_actions_router
+        from pmc.serve.routes.world import build_world_router
+        from pmc.storage.action_store import ActionStore
         from pmc.storage.artifact_store import ArtifactStore
         from pmc.storage.audit import AuditLog
         from pmc.storage.deletion import DeletionManager
         from pmc.storage.founders import FounderTracker
         from pmc.storage.user_store import UserStore
+        from pmc.storage.verification_store import VerificationStore
+        from pmc.world import WorldStore
 
         user_store = UserStore(storage_root)
         artifact_store = ArtifactStore(storage_root)
+        verification_store = VerificationStore(storage_root)
+        action_store = ActionStore(storage_root)
+        world_store = WorldStore(storage_root)
         audit_log = AuditLog(storage_root)
         deletion = DeletionManager(user_store, artifact_store, audit_log)
+        action_service = ActionService(
+            verification_store,
+            audit_log,
+            action_store=action_store,
+            adapter_registry=build_default_action_registry(storage_root),
+        )
+        app.include_router(build_actions_router(action_service))
+        app.include_router(build_world_router(world_store, audit_log))
         monitor = Monitor(
             user_store,
             artifact_store,
@@ -198,6 +303,7 @@ def create_app(
             audit_log=audit_log,
             deletion=deletion,
             registry=server.registry,
+            verification_store=verification_store,
         )
         scheduler = JobScheduler(pipeline, max_workers=1)
         # Map job_id → submitted_at timestamp so SSE can window events by job
@@ -379,6 +485,7 @@ def create_app(
                 skip_eval=body.get("skip_eval", False),
                 skip_deploy=body.get("skip_deploy", False),
                 dry_run=body.get("dry_run", False),
+                require_verification_to_deploy=body.get("require_verification_to_deploy", True),
             )
 
             # Founder grant: first 100 users training on Try tier get it free.
@@ -417,6 +524,56 @@ def create_app(
             if job is None or job.user_id != user_id:
                 raise HTTPException(status_code=404, detail=f"No job {job_id!r} for {user_id!r}")
             return job.model_dump(mode="json")
+
+        @app.post("/v1/users/{user_id}/runs/{run_id}/promote")
+        def promote_verified_run(user_id: str, run_id: str) -> dict[str, Any]:
+            """Promote a trained run after private verification passes."""
+            report = verification_store.trust_report(user_id)
+            if report.readiness not in {"voice", "sandbox", "supervised"}:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "reason": "private verification has not passed",
+                        "trust_report": report.model_dump(mode="json"),
+                    },
+                )
+            if report.privacy_flags:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "reason": "privacy flags must be resolved before promotion",
+                        "trust_report": report.model_dump(mode="json"),
+                    },
+                )
+            bundle_dir = artifact_store.paths.bundle_dir(user_id, run_id)
+            if not bundle_dir.is_dir():
+                raise HTTPException(status_code=404, detail=f"No run {run_id!r} for {user_id!r}")
+
+            pointer = artifact_store.set_active(
+                user_id,
+                run_id,
+                notes="promoted after private verification",
+            )
+            registered = False
+            if server.registry is not None:
+                server.registry.register_bundle(bundle_dir)
+                registered = True
+            audit_log.log(
+                user_id,
+                stage="deploy",
+                event="adapter_promoted_after_verification",
+                run_id=run_id,
+                data={
+                    "readiness": report.readiness,
+                    "registered": registered,
+                },
+            )
+            return {
+                "ok": True,
+                "active": pointer.model_dump(mode="json"),
+                "registered": registered,
+                "trust_report": report.model_dump(mode="json"),
+            }
 
         @app.get("/v1/users/{user_id}/runs/{job_id}/events")
         def stream_run_events(user_id: str, job_id: str) -> Any:
@@ -558,9 +715,9 @@ def create_app(
         # endpoint returns a generated opening line conditioned on the user's
         # style profile.
 
-        # Five grounded situations — the V0 default. Production should draw
-        # situations from the user's own patterns (real contacts, real email
-        # types). The shape matches design/app/README.md's eval contract.
+        # Fallback situations only. The frontier path builds private probes
+        # from held-out user data; these keep the first-user path usable before
+        # a curated holdout exists.
         EVAL_SITUATIONS = [
             "Maya texted: 'free for dinner thursday?'",
             "A friend you haven't seen in months: 'how have you been? we should catch up'",
@@ -569,7 +726,12 @@ def create_app(
             "Old friend who moved away: 'i'm in town this weekend — coffee?'",
         ]
 
-        def _eval_response_for(user_id: str, situation: str) -> str:
+        def _eval_response_for(
+            user_id: str,
+            situation: str,
+            *,
+            prompt: list[Message] | None = None,
+        ) -> str:
             """Generate the model's draft reply to a situation.
 
             Uses the user's adapter via the chat completions path if it's
@@ -580,12 +742,11 @@ def create_app(
                 record = server.registry.require(user_id)
             except Exception:
                 return "(your model isn't loaded yet — placeholder reply)"
-            messages = [
-                {
-                    "role": "user",
-                    "content": situation,
-                }
-            ]
+            messages = (
+                [{"role": msg.role.value, "content": msg.content} for msg in prompt]
+                if prompt
+                else [{"role": "user", "content": situation}]
+            )
             try:
                 text, _usage = server.engine.chat(
                     record=record,
@@ -597,46 +758,267 @@ def create_app(
             except Exception as e:
                 return f"(generation error: {e})"
 
+        def _candidate_identity(user_id: str) -> tuple[CandidateOrigin, str | None]:
+            try:
+                record = server.registry.require(user_id)
+                return CandidateOrigin.PERSONAL_MODEL, record.base_model
+            except Exception:
+                return CandidateOrigin.SYNTHETIC, None
+
+        def _first_candidate_text(completion: Any) -> str | None:
+            if not completion.candidates:
+                return None
+            candidate = completion.candidates[0]
+            if not candidate.messages:
+                return None
+            text = "\n".join(m.content for m in candidate.messages if m.content.strip()).strip()
+            return text or None
+
+        def _build_eval_probes(user_id: str, *, limit: int = 5) -> list[PersonalProbe]:
+            """Build private probes from held-out examples, then fallback scenarios."""
+            probes: list[PersonalProbe] = []
+            origin, model = _candidate_identity(user_id)
+
+            for version in reversed(user_store.list_dataset_versions(user_id)):
+                holdout = user_store.load_holdout(user_id, version)
+                if not holdout:
+                    continue
+                for completion in holdout:
+                    if len(probes) >= limit:
+                        break
+                    reference = _first_candidate_text(completion)
+                    if not completion.conversation.messages or not reference:
+                        continue
+                    situation = " ".join(
+                        msg.content.strip()
+                        for msg in completion.conversation.messages
+                        if msg.content.strip()
+                    ).strip()
+                    response = _eval_response_for(
+                        user_id,
+                        situation,
+                        prompt=completion.conversation.messages,
+                    )
+                    probes.append(
+                        PersonalProbe(
+                            user_id=user_id,
+                            kind=ProbeKind.VOICE,
+                            prompt=completion.conversation.messages,
+                            candidates=[
+                                ProbeCandidate(
+                                    origin=origin,
+                                    text=response,
+                                    model=model,
+                                )
+                            ],
+                            reference=reference,
+                            source_completion_id=str(completion.id),
+                            dataset_version=version,
+                            surface="eval",
+                        )
+                    )
+                if probes:
+                    break
+
+            if probes:
+                return probes
+
+            for situation in EVAL_SITUATIONS[:limit]:
+                response = _eval_response_for(user_id, situation)
+                probes.append(
+                    PersonalProbe(
+                        user_id=user_id,
+                        kind=ProbeKind.VOICE,
+                        prompt=[Message(role=Role.USER, content=situation)],
+                        candidates=[
+                            ProbeCandidate(
+                                origin=origin,
+                                text=response,
+                                model=model,
+                            )
+                        ],
+                        surface="eval",
+                        metadata={"fallback": True},
+                    )
+                )
+            return probes
+
+        def _probe_payload(probe: PersonalProbe) -> dict[str, Any]:
+            first_candidate = probe.candidates[0] if probe.candidates else None
+            return {
+                "id": probe.id,
+                "kind": probe.kind.value,
+                "situation": probe.prompt_text(),
+                "response": first_candidate.text if first_candidate else "",
+                "reference": probe.reference,
+                "source_completion_id": probe.source_completion_id,
+                "dataset_version": probe.dataset_version,
+                "candidates": [
+                    {
+                        "id": candidate.id,
+                        "origin": candidate.origin.value,
+                        "text": candidate.text,
+                        "model": candidate.model,
+                    }
+                    for candidate in probe.candidates
+                ],
+            }
+
+        def _normalize_verdict(value: Any) -> JudgmentVerdict:
+            raw = str(value or "").strip().lower().replace("-", "_")
+            aliases = {
+                "": JudgmentVerdict.UNSURE,
+                "yes": JudgmentVerdict.APPROVE,
+                "good": JudgmentVerdict.APPROVE,
+                "approve": JudgmentVerdict.APPROVE,
+                "approved": JudgmentVerdict.APPROVE,
+                "accept": JudgmentVerdict.APPROVE,
+                "accepted": JudgmentVerdict.APPROVE,
+                "no": JudgmentVerdict.REJECT,
+                "bad": JudgmentVerdict.REJECT,
+                "reject": JudgmentVerdict.REJECT,
+                "rejected": JudgmentVerdict.REJECT,
+                "edit": JudgmentVerdict.EDIT,
+                "edited": JudgmentVerdict.EDIT,
+                "choose": JudgmentVerdict.CHOOSE,
+                "chosen": JudgmentVerdict.CHOOSE,
+                "not_me": JudgmentVerdict.NOT_ME,
+                "too_formal": JudgmentVerdict.TOO_FORMAL,
+                "too_casual": JudgmentVerdict.TOO_CASUAL,
+                "private": JudgmentVerdict.PRIVATE,
+                "wrong": JudgmentVerdict.WRONG,
+                "unsure": JudgmentVerdict.UNSURE,
+            }
+            if raw in aliases:
+                return aliases[raw]
+            try:
+                return JudgmentVerdict(raw)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Unknown verdict: {value!r}") from e
+
         @app.get("/v1/users/{user_id}/eval/prompts")
         def eval_prompts(user_id: str) -> dict[str, Any]:
-            prompts = [
-                {
-                    "id": f"eval-{i}",
-                    "situation": s,
-                    "response": _eval_response_for(user_id, s),
-                }
-                for i, s in enumerate(EVAL_SITUATIONS)
-            ]
-            return {"prompts": prompts}
+            probes = verification_store.list_probes(user_id, limit=20)
+            if not probes:
+                probes = _build_eval_probes(user_id)
+                verification_store.save_probes(user_id, probes)
+                audit_log.log(
+                    user_id,
+                    stage="eval",
+                    event="verification_probes_built",
+                    data={
+                        "count": len(probes),
+                        "kinds": sorted({probe.kind.value for probe in probes}),
+                    },
+                )
+            return {
+                "prompts": [_probe_payload(probe) for probe in probes[:5]],
+                "trust_report": verification_store.trust_report(user_id).model_dump(mode="json"),
+            }
 
         @app.post("/v1/users/{user_id}/eval/judgments")
         def eval_judgment(user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-            """Persist one judgment to a per-user JSONL. The next retrain
-            picks these up as DPO-grade preference pairs."""
-            from datetime import datetime as _dt
-            ledger = user_store.paths.user_root(user_id) / "eval_judgments.jsonl"
-            ledger.parent.mkdir(parents=True, exist_ok=True)
-            row = {
-                "ts": _dt.utcnow().isoformat() + "Z",
-                "prompt_id": payload.get("promptId"),
-                "verdict": payload.get("verdict"),
-                "edited_text": payload.get("editedText"),
-                "reason": payload.get("reason"),
-            }
-            with ledger.open("a", encoding="utf-8") as f:
-                f.write(_json.dumps(row) + "\n")
+            """Persist one structured judgment.
+
+            This is training data, not UI state. Edits and pairwise choices can
+            become SFT/DPO examples on the next run.
+            """
+            probe_id = str(
+                payload.get("probeId")
+                or payload.get("promptId")
+                or payload.get("id")
+                or ""
+            )
+            if not probe_id:
+                raise HTTPException(status_code=400, detail="probeId or promptId required")
+            probe = verification_store.get_probe(user_id, probe_id)
+            if probe is None:
+                raise HTTPException(status_code=404, detail=f"No verification probe {probe_id!r}")
+
+            verdict = _normalize_verdict(payload.get("verdict"))
+            chosen_candidate_id = payload.get("chosenCandidateId") or payload.get("candidateId")
+            if chosen_candidate_id is None and probe.candidates:
+                chosen_candidate_id = probe.candidates[0].id
+            rejected_candidate_ids = payload.get("rejectedCandidateIds") or []
+            if not isinstance(rejected_candidate_ids, list):
+                rejected_candidate_ids = [str(rejected_candidate_ids)]
+
+            judgment = UserJudgment(
+                user_id=user_id,
+                probe_id=probe_id,
+                verdict=verdict,
+                chosen_candidate_id=chosen_candidate_id,
+                rejected_candidate_ids=[str(v) for v in rejected_candidate_ids],
+                edited_text=payload.get("editedText") or payload.get("edited_text"),
+                reason=payload.get("reason"),
+                dimension=str(payload.get("dimension") or "overall"),
+                score=payload.get("score"),
+                metadata={
+                    "surface": str(payload.get("surface") or "eval"),
+                },
+            )
+            verification_store.append_judgment(user_id, judgment)
+            report = verification_store.trust_report(user_id)
             audit_log.log(
                 user_id, stage="eval", event="judgment_recorded",
-                data={"verdict": row["verdict"], "prompt_id": row["prompt_id"]},
+                data={
+                    "verdict": judgment.verdict.value,
+                    "probe_id": judgment.probe_id,
+                    "readiness": report.readiness,
+                },
             )
-            return {"ok": True}
+            return {
+                "ok": True,
+                "judgment": judgment.model_dump(mode="json"),
+                "trust_report": report.model_dump(mode="json"),
+            }
+
+        @app.get("/v1/users/{user_id}/verification/trust-report")
+        def verification_trust_report(user_id: str) -> dict[str, Any]:
+            return verification_store.trust_report(user_id).model_dump(mode="json")
+
+        @app.get("/v1/users/{user_id}/verification/training-signal")
+        def verification_training_signal(user_id: str) -> dict[str, Any]:
+            preference = verification_store.preference_completions(user_id)
+            action_sft = verification_store.action_sft_completions(user_id)
+            return {
+                "user_id": user_id,
+                "preference_completions": len(preference),
+                "action_sft_completions": len(action_sft),
+                "total_completions": len(preference) + len(action_sft),
+            }
 
         @app.get("/v1/users/{user_id}/first-meeting/opening")
         def first_meeting_opening(user_id: str) -> dict[str, Any]:
             """Generate the model's opening line — recognition → known-you-
             forever → humility → hand over control. Conditioned on the
-            user's style profile so it lands in their own register."""
+            user's style profile so it lands in their own register.
+
+            New: prefers the working-memory snapshot's `anticipation`
+            items if present. Those are the 3-5 specific things Claude
+            decided the agent might surface today. Picking the first
+            anticipation item as the opening gives a specific, live,
+            forward-looking opening line — exactly what the /meet spec
+            calls for."""
             import json as _json2
+
+            # First-best source: working-memory snapshot's anticipation.
+            try:
+                from pmc.memory.recall.store import RecallStore
+                recall_path = user_store.paths.user_root(user_id) / "recall.db"
+                if recall_path.is_file():
+                    store = RecallStore(recall_path)
+                    snap = store.latest_working_memory()
+                    store.close()
+                    if snap and snap.anticipation:
+                        # Take the first anticipation item verbatim. The
+                        # working-memory builder is already prompted to
+                        # produce single-sentence, lowercase, in-register
+                        # lines.
+                        return {"line": snap.anticipation[0], "generated": True}
+            except Exception:
+                pass
+
             identity_path = user_store.paths.user_root(user_id) / "identity.json"
             facts: list[str] = []
             display_name = user_id
@@ -680,6 +1062,36 @@ def create_app(
                     "i think i get you. where do you want to start?"
                 ),
                 "generated": False,
+            }
+
+        @app.post("/v1/users/{user_id}/reset")
+        def reset_user(user_id: str) -> dict[str, Any]:
+            """Wipe everything for this user and unregister any deployed
+            adapter. Used by the "Start over" affordance in the app —
+            takes the user back to a fresh state where /connect re-runs
+            from scratch.
+
+            Irreversible. The user is the only one allowed to call this
+            for their own id; gating happens at the auth layer above
+            (V0 dev backend trusts the caller)."""
+            existed = user_store.delete_user(user_id)
+            # Also unregister the adapter if it was deployed.
+            unregistered = False
+            if server is not None and server.registry is not None:
+                try:
+                    server.registry.unregister(user_id)
+                    unregistered = True
+                except KeyError:
+                    pass
+            audit_log.log(
+                user_id, stage="user", event="user_reset",
+                data={"existed": existed, "adapter_unregistered": unregistered},
+            )
+            return {
+                "ok": True,
+                "user_id": user_id,
+                "data_wiped": existed,
+                "adapter_unregistered": unregistered,
             }
 
         @app.delete("/v1/users/{user_id}/sources/{source_id}")

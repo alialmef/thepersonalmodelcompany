@@ -15,6 +15,14 @@ Layout:
           curated/{version}.jsonl            # curated Completions
           curated/{version}_manifest.json    # DataManifest for this dataset
           curated/holdout_{version}.jsonl    # held-out completions
+          verification/probes.jsonl           # private user-specific eval probes
+          verification/judgments.jsonl        # user judgments over probes
+          verification/action_proposals.jsonl # dry-run action proposals
+          verification/action_traces.jsonl    # supervised tool/action decisions
+          verification/action_receipts.jsonl  # simulate/stage/execute/undo receipts
+          actions/undo/                       # local undo snapshots for adapters
+          world/files.jsonl                   # latest laptop-world file index
+          world/scans.jsonl                   # scan reports
           bundles/{run_id}/                  # ArtifactBundle per training run
           active.json                        # pointer: which run_id is currently active
           audit.jsonl                        # append-only event log
@@ -127,3 +135,41 @@ class StoragePaths:
         """Append-only ledger of every training run + its eval scalar.
         Powers the per-user "your model over time" view."""
         return self.user_root(user_id) / "runs.jsonl"
+
+    # -- verification + personal evals -----------------------------------
+
+    def verification_dir(self, user_id: str) -> Path:
+        """Durable private eval and correction artifacts."""
+        return self.user_root(user_id) / "verification"
+
+    def verification_probes_file(self, user_id: str) -> Path:
+        return self.verification_dir(user_id) / "probes.jsonl"
+
+    def verification_judgments_file(self, user_id: str) -> Path:
+        return self.verification_dir(user_id) / "judgments.jsonl"
+
+    def action_proposals_file(self, user_id: str) -> Path:
+        return self.verification_dir(user_id) / "action_proposals.jsonl"
+
+    def action_traces_file(self, user_id: str) -> Path:
+        return self.verification_dir(user_id) / "action_traces.jsonl"
+
+    def action_receipts_file(self, user_id: str) -> Path:
+        return self.verification_dir(user_id) / "action_receipts.jsonl"
+
+    def action_runtime_dir(self, user_id: str) -> Path:
+        return self.user_root(user_id) / "actions"
+
+    def action_undo_dir(self, user_id: str) -> Path:
+        return self.action_runtime_dir(user_id) / "undo"
+
+    # -- laptop world index ----------------------------------------------
+
+    def world_dir(self, user_id: str) -> Path:
+        return self.user_root(user_id) / "world"
+
+    def world_files_file(self, user_id: str) -> Path:
+        return self.world_dir(user_id) / "files.jsonl"
+
+    def world_scans_file(self, user_id: str) -> Path:
+        return self.world_dir(user_id) / "scans.jsonl"

@@ -31,7 +31,7 @@ from pathlib import Path
 from datetime import datetime
 
 from pmc.schema.conversation import Completion
-from pmc.schema.training import AdapterConfig, TrainingConfig
+from pmc.schema.training import TrainingConfig
 from pmc.train.config import SFTRunResult
 from pmc.train.formatter import completion_to_messages
 

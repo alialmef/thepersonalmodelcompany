@@ -13,7 +13,6 @@ to this user's account on 2026-01-15?" — not strict observability.
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +32,8 @@ KNOWN_STAGES = {
     "delete",
     "export",
     "user",
+    "action",
+    "memory",
 }
 
 

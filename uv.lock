@@ -3182,13 +3182,17 @@ name = "pmc"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anthropic" },
+    { name = "fastapi" },
+    { name = "openai" },
     { name = "pydantic" },
+    { name = "python-multipart" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
 all = [
     { name = "accelerate" },
-    { name = "anthropic" },
     { name = "beautifulsoup4" },
     { name = "bitsandbytes" },
     { name = "datasets" },
@@ -3197,7 +3201,6 @@ all = [
     { name = "google-auth-oauthlib" },
     { name = "httpx" },
     { name = "mypy" },
-    { name = "openai" },
     { name = "peft" },
     { name = "pypdf2" },
     { name = "pytest" },
@@ -3208,7 +3211,6 @@ all = [
     { name = "torch" },
     { name = "transformers" },
     { name = "trl" },
-    { name = "uvicorn" },
 ]
 dev = [
     { name = "fastapi" },
@@ -3218,10 +3220,6 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "python-multipart" },
     { name = "ruff" },
-]
-eval = [
-    { name = "anthropic" },
-    { name = "openai" },
 ]
 ingest = [
     { name = "beautifulsoup4" },
@@ -3233,17 +3231,7 @@ ingest = [
 modal = [
     { name = "modal" },
 ]
-serve = [
-    { name = "fastapi" },
-    { name = "openai" },
-    { name = "python-multipart" },
-    { name = "uvicorn" },
-]
 serve-gpu = [
-    { name = "fastapi" },
-    { name = "openai" },
-    { name = "python-multipart" },
-    { name = "uvicorn" },
     { name = "vllm" },
 ]
 train = [
@@ -3259,19 +3247,18 @@ train = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'train'", specifier = ">=0.30" },
-    { name = "anthropic", marker = "extra == 'eval'", specifier = ">=0.25" },
+    { name = "anthropic", specifier = ">=0.25" },
     { name = "beautifulsoup4", marker = "extra == 'ingest'", specifier = ">=4.12" },
     { name = "bitsandbytes", marker = "extra == 'train'", specifier = ">=0.43" },
     { name = "datasets", marker = "extra == 'train'", specifier = ">=2.19" },
+    { name = "fastapi", specifier = ">=0.111" },
     { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.111" },
-    { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.111" },
     { name = "google-api-python-client", marker = "extra == 'ingest'", specifier = ">=2.0" },
     { name = "google-auth-oauthlib", marker = "extra == 'ingest'", specifier = ">=1.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=0.66" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "openai", marker = "extra == 'eval'", specifier = ">=1.30" },
-    { name = "openai", marker = "extra == 'serve'", specifier = ">=1.30" },
+    { name = "openai", specifier = ">=1.30" },
     { name = "peft", marker = "extra == 'train'", specifier = ">=0.11" },
     { name = "pmc", extras = ["ingest", "train", "eval", "serve", "dev"], marker = "extra == 'all'" },
     { name = "pmc", extras = ["serve"], marker = "extra == 'serve-gpu'" },
@@ -3280,13 +3267,13 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "python-docx", marker = "extra == 'ingest'", specifier = ">=1.0" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "python-multipart", marker = "extra == 'dev'", specifier = ">=0.0.9" },
-    { name = "python-multipart", marker = "extra == 'serve'", specifier = ">=0.0.9" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "torch", marker = "extra == 'train'", specifier = ">=2.3" },
     { name = "transformers", marker = "extra == 'train'", specifier = ">=4.40" },
     { name = "trl", marker = "extra == 'train'", specifier = ">=0.9" },
-    { name = "uvicorn", marker = "extra == 'serve'", specifier = ">=0.30" },
+    { name = "uvicorn", specifier = ">=0.30" },
     { name = "vllm", marker = "extra == 'serve-gpu'", specifier = ">=0.5" },
 ]
 provides-extras = ["ingest", "train", "eval", "serve", "serve-gpu", "modal", "dev", "all"]

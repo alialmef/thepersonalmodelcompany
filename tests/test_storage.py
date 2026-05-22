@@ -193,6 +193,33 @@ def test_user_store_delete_source(tmp_path: Path):
     assert store.list_sources("u") == ["imessage"]
 
 
+def test_user_store_writing_stable_id_removes_legacy_timestamped(tmp_path: Path):
+    # Pre-fix Tauri ingesters wrote timestamped source_ids; users from
+    # that era have stale files like imessage-20260521-181322.jsonl on
+    # disk. When the new app writes the stable "imessage" id, those
+    # legacy siblings should be auto-cleaned so they don't double-count
+    # in curate / status breakdowns.
+    store = UserStore(tmp_path)
+    store.save_raw_items("u", "imessage-20260521-181322", [_raw_item(SourceType.IMESSAGE, "old1")])
+    store.save_raw_items("u", "imessage-20260521-182359", [_raw_item(SourceType.IMESSAGE, "old2")])
+    # An unrelated source must NOT be touched.
+    store.save_raw_items("u", "gmail", [_raw_item(SourceType.EMAIL, "g")])
+
+    store.save_raw_items("u", "imessage", [_raw_item(SourceType.IMESSAGE, "new")])
+
+    assert sorted(store.list_sources("u")) == ["gmail", "imessage"]
+    assert store.count_raw_items("u", "imessage") == 1
+
+
+def test_user_store_writing_legacy_id_does_not_self_delete(tmp_path: Path):
+    # Defensive: if for any reason a legacy id is written (e.g. an
+    # old client somehow still in the wild), don't self-delete the file
+    # we just wrote.
+    store = UserStore(tmp_path)
+    store.save_raw_items("u", "imessage-20260521-181322", [_raw_item(SourceType.IMESSAGE, "x")])
+    assert store.list_sources("u") == ["imessage-20260521-181322"]
+
+
 # ---------- UserStore: curated datasets ----------
 
 

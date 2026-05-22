@@ -133,6 +133,25 @@ def test_registry_register_bundle(tmp_path: Path):
     assert Path(record.bundle_dir).is_dir()
 
 
+def test_registry_register_bundle_reads_together_remote_handle(tmp_path: Path):
+    adapter = _fake_adapter(tmp_path / "adapter_remote", base_model="moonshotai/Kimi-K2-Instruct-0905")
+    (adapter / "remote.json").write_text(
+        json.dumps({
+            "provider": "together",
+            "job_id": "ftjob-1",
+            "base_model": "moonshotai/Kimi-K2-Instruct-0905",
+            "output_model": "ft:pmc-alex",
+        })
+    )
+    bundle_dir = _persist_bundle(adapter, tmp_path / "bundle-remote", user_id="alex")
+    registry = AdapterRegistry(tmp_path / "reg-remote")
+    record = registry.register_bundle(bundle_dir)
+
+    assert record.metadata["provider"] == "together"
+    assert record.metadata["together_job_id"] == "ftjob-1"
+    assert record.metadata["together_output_model"] == "ft:pmc-alex"
+
+
 def test_registry_unregister(tmp_path: Path):
     adapter = _fake_adapter(tmp_path / "adapter")
     registry = AdapterRegistry(tmp_path / "reg")
@@ -409,6 +428,19 @@ def test_api_healthz(tmp_path: Path):
     assert body["base_model"] == "mock/base"
 
 
+def test_api_runtime_capabilities(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("PMC_TRAINER", "together")
+    monkeypatch.delenv("TOGETHER_API_KEY", raising=False)
+    client, _ = _client(tmp_path)
+    r = client.get("/v1/runtime/capabilities")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["training"]["provider"] == "together"
+    assert body["training"]["available"] is False
+    assert body["training"]["together_key_present"] is False
+    assert body["inference"]["provider"] == "mock"
+
+
 def test_api_list_models(tmp_path: Path):
     client, _ = _client(tmp_path)
     r = client.get("/v1/models")
@@ -479,6 +511,54 @@ def test_api_chat_stream_returns_sse(tmp_path: Path):
     # Last meaningful chunk has a finish_reason
     last = json.loads(events[-2])
     assert last["choices"][0]["finish_reason"] in {"stop", "length"}
+
+
+def test_api_chat_stream_uses_engine_acceptance_hook(tmp_path: Path):
+    """Hosted engines can accept registered remote models whose base differs."""
+
+    class FlexibleMockEngine(MockEngine):
+        def allows_base_model(
+            self,
+            base_model: str,
+            record: AdapterRecord | None = None,
+        ) -> bool:
+            return bool(record and record.metadata.get("provider") == "together")
+
+    adapter = _fake_adapter(tmp_path / "adapter-remote")
+    registry = AdapterRegistry(tmp_path / "reg-remote-stream")
+    record = registry.register(
+        "remote-user",
+        adapter,
+        base_model="moonshotai/Kimi-K2-Instruct-0905",
+    )
+    record.metadata["provider"] = "together"
+    server = PMCServer(
+        registry,
+        FlexibleMockEngine(base_model="mock/base", default="remote stream ok"),
+    )
+    client = TestClient(create_app(server))
+
+    with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "remote-user",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as r:
+        assert r.status_code == 200
+        body = b"".join(r.iter_bytes()).decode("utf-8")
+    events = [
+        line[len("data: ") :]
+        for line in body.split("\n\n")
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
+    text = "".join(
+        json.loads(event)["choices"][0]["delta"].get("content") or ""
+        for event in events
+    )
+    assert text == "remote stream ok"
 
 
 def test_api_chat_stream_unknown_user_404(tmp_path: Path):
@@ -811,6 +891,223 @@ def test_api_cors_headers(tmp_path: Path):
         },
     )
     assert r.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+
+# ---------- Verification endpoints ----------
+
+
+def test_api_eval_prompts_build_private_probes(tmp_path: Path):
+    client, _, storage = _storage_client(tmp_path)
+    r = client.get("/v1/users/alex/eval/prompts")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["prompts"]) == 5
+    assert body["prompts"][0]["id"].startswith("probe-")
+    assert body["prompts"][0]["kind"] == "voice"
+    assert "candidates" in body["prompts"][0]
+    assert (storage / "users" / "alex" / "verification" / "probes.jsonl").is_file()
+
+
+def test_api_eval_judgment_records_training_signal(tmp_path: Path):
+    client, _, _ = _storage_client(tmp_path)
+    prompts = client.get("/v1/users/alex/eval/prompts").json()["prompts"]
+    first = prompts[0]
+    candidate_id = first["candidates"][0]["id"]
+
+    r = client.post(
+        "/v1/users/alex/eval/judgments",
+        json={
+            "probeId": first["id"],
+            "verdict": "edit",
+            "chosenCandidateId": candidate_id,
+            "editedText": "yeah thursday works",
+            "dimension": "voice",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["judgment"]["verdict"] == "edit"
+    assert body["trust_report"]["total_judgments"] == 1
+
+    signal = client.get("/v1/users/alex/verification/training-signal").json()
+    assert signal["preference_completions"] == 1
+
+
+def test_api_action_trace_updates_trust_report(tmp_path: Path):
+    client, _, _ = _storage_client(tmp_path)
+    r = client.post(
+        "/v1/users/alex/verification/action-traces",
+        json={
+            "surface": "mail",
+            "operation": "draft_reply",
+            "proposed_text": "Sure, Thursday works.",
+            "decision": "approved",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["trace"]["decision"] == "approved"
+    assert body["trust_report"]["total_action_traces"] == 1
+
+    signal = client.get("/v1/users/alex/verification/training-signal").json()
+    assert signal["action_sft_completions"] == 1
+
+
+def test_api_action_proposal_review_creates_trace(tmp_path: Path):
+    client, _, storage = _storage_client(tmp_path)
+    create = client.post(
+        "/v1/users/alex/actions/proposals",
+        json={
+            "surface": "messages",
+            "operation": "draft_reply",
+            "prompt": "Reply to Maya",
+            "proposed_text": "Sure, Thursday works.",
+            "proposed_payload": {"recipient": "Maya"},
+        },
+    )
+    assert create.status_code == 200, create.text
+    proposal = create.json()["proposal"]
+    assert proposal["id"].startswith("prop-")
+    assert proposal["risk_level"] == "low"
+
+    review = client.post(
+        f"/v1/users/alex/actions/proposals/{proposal['id']}/review",
+        json={
+            "decision": "edited",
+            "edited_text": "yeah thursday works",
+            "final_payload": {"recipient": "Maya"},
+        },
+    )
+    assert review.status_code == 200, review.text
+    body = review.json()
+    assert body["proposal"]["status"] == "edited"
+    assert body["trace"]["proposal_id"] == proposal["id"]
+    assert body["trace"]["edited_text"] == "yeah thursday works"
+    assert (storage / "users" / "alex" / "verification" / "action_proposals.jsonl").is_file()
+
+    signal = client.get("/v1/users/alex/verification/training-signal").json()
+    assert signal["action_sft_completions"] == 1
+
+
+def test_api_action_proposal_risk_ladder(tmp_path: Path):
+    client, _, _ = _storage_client(tmp_path)
+    create = client.post(
+        "/v1/users/alex/actions/proposals",
+        json={
+            "surface": "mail",
+            "operation": "send_email",
+            "proposed_text": "Sending this would be high risk.",
+            "proposed_payload": {"to": "x@example.com"},
+        },
+    )
+    assert create.status_code == 200, create.text
+    body = create.json()
+    assert body["proposal"]["risk_level"] == "high"
+    assert body["review"]["requires_confirmation"] is True
+    assert body["review"]["execution_allowed"] is False
+
+
+def test_api_action_runtime_executes_and_undos_local_file(tmp_path: Path):
+    client, _, _ = _storage_client(tmp_path)
+    target = tmp_path / "laptop" / "note.md"
+    create = client.post(
+        "/v1/users/alex/actions/proposals",
+        json={
+            "surface": "files",
+            "operation": "write_text",
+            "risk_level": "medium",
+            "proposed_text": "write a note",
+            "proposed_payload": {
+                "path": str(target),
+                "content": "local world note",
+            },
+        },
+    )
+    assert create.status_code == 200, create.text
+    proposal = create.json()["proposal"]
+
+    simulated = client.post(f"/v1/users/alex/actions/proposals/{proposal['id']}/simulate")
+    assert simulated.status_code == 200, simulated.text
+    assert simulated.json()["receipt"]["ok"] is True
+    assert target.exists() is False
+
+    blocked = client.post(f"/v1/users/alex/actions/proposals/{proposal['id']}/execute")
+    assert blocked.status_code == 400
+
+    review = client.post(
+        f"/v1/users/alex/actions/proposals/{proposal['id']}/review",
+        json={"decision": "approved"},
+    )
+    assert review.status_code == 200, review.text
+
+    executed = client.post(f"/v1/users/alex/actions/proposals/{proposal['id']}/execute")
+    assert executed.status_code == 200, executed.text
+    body = executed.json()
+    assert body["proposal"]["status"] == "executed"
+    assert target.read_text(encoding="utf-8") == "local world note"
+
+    undone = client.post(
+        f"/v1/users/alex/actions/proposals/{proposal['id']}/undo",
+        json={"undo_token": body["receipt"]["undo_token"]},
+    )
+    assert undone.status_code == 200, undone.text
+    assert target.exists() is False
+
+
+def test_api_world_scan_indexes_requested_root(tmp_path: Path):
+    client, _, storage = _storage_client(tmp_path)
+    root = tmp_path / "laptop"
+    root.mkdir()
+    (root / "project.md").write_text("personal project context", encoding="utf-8")
+
+    scan = client.post(
+        "/v1/users/alex/world/scan",
+        json={
+            "roots": [str(root)],
+            "full_disk": False,
+            "max_files": 25,
+        },
+    )
+    assert scan.status_code == 200, scan.text
+    assert scan.json()["scan"]["files_indexed"] == 1
+
+    files = client.get("/v1/users/alex/world/files", params={"query": "project"})
+    assert files.status_code == 200, files.text
+    body = files.json()
+    assert body["files"][0]["name"] == "project.md"
+    assert (storage / "users" / "alex" / "world" / "files.jsonl").is_file()
+
+
+def test_api_promote_requires_private_verification(tmp_path: Path):
+    client, _, storage = _storage_client(tmp_path)
+    adapter = _fake_adapter(tmp_path / "adapter-promote")
+    _persist_bundle(
+        adapter,
+        storage / "users" / "alex" / "bundles" / "run-verified",
+        user_id="alex",
+    )
+
+    blocked = client.post("/v1/users/alex/runs/run-verified/promote")
+    assert blocked.status_code == 409
+
+    prompts = client.get("/v1/users/alex/eval/prompts").json()["prompts"]
+    for prompt in prompts[:3]:
+        r = client.post(
+            "/v1/users/alex/eval/judgments",
+            json={
+                "probeId": prompt["id"],
+                "verdict": "approve",
+                "chosenCandidateId": prompt["candidates"][0]["id"],
+                "dimension": "voice",
+            },
+        )
+        assert r.status_code == 200, r.text
+
+    promoted = client.post("/v1/users/alex/runs/run-verified/promote")
+    assert promoted.status_code == 200, promoted.text
+    body = promoted.json()
+    assert body["active"]["run_id"] == "run-verified"
+    assert body["trust_report"]["readiness"] == "voice"
 
 
 # ---------- Pipeline runs (Act 3 backend: job submission + SSE) ----------

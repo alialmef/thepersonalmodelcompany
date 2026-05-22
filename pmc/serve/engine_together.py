@@ -31,10 +31,11 @@ DEFAULT_BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct-Reference"
 class TogetherEngine:
     """InferenceEngine impl backed by Together AI's hosted multi-LoRA serving.
 
-    Adapter routing: when serving a user's request, we send `model=base_model`
-    and pass the adapter reference via Together's `lora` extra field. The
-    AdapterRecord's `metadata['together_adapter_id']` carries the upload ID
-    returned by `upload_adapter()`.
+    Adapter routing supports two Together shapes:
+    - `metadata['together_output_model']`: a fine-tuned model id returned by
+      Together fine-tuning. We route directly to that model.
+    - `metadata['together_adapter_id']`: a separate LoRA adapter reference. We
+      send the base model plus Together's `lora` extra body.
     """
 
     def __init__(
@@ -117,13 +118,15 @@ class TogetherEngine:
         top_p: float,
         stop: list[str] | None,
     ) -> dict[str, Any]:
+        output_model = record.metadata.get("together_output_model")
         adapter_id = record.metadata.get("together_adapter_id")
+        base_model = record.metadata.get("together_base_model") or self.base_model
         # Together passes LoRA reference via extra_body — adjust if their API changes.
         extra_body: dict[str, Any] = {}
-        if adapter_id:
+        if adapter_id and not output_model:
             extra_body["lora"] = adapter_id
         kwargs: dict[str, Any] = {
-            "model": self.base_model,
+            "model": output_model or base_model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -134,6 +137,16 @@ class TogetherEngine:
         if extra_body:
             kwargs["extra_body"] = extra_body
         return kwargs
+
+    def allows_base_model(self, base_model: str, record: AdapterRecord | None = None) -> bool:
+        """Together can serve remote fine-tuned model IDs across base families."""
+
+        if not record or record.metadata.get("provider") != "together":
+            return False
+        return bool(
+            record.metadata.get("together_output_model")
+            or record.metadata.get("together_adapter_id")
+        )
 
     # -- adapter upload (called by orchestrator after training) -----------
 
@@ -170,7 +183,21 @@ class TogetherEngine:
 
 def set_together_adapter_id(record: AdapterRecord, adapter_id: str) -> None:
     """Store a Together adapter ID on a record so the engine can route to it."""
+    record.metadata["provider"] = "together"
     record.metadata["together_adapter_id"] = adapter_id
 
 
-__all__ = ["DEFAULT_BASE_MODEL", "DEFAULT_BASE_URL", "TogetherEngine", "set_together_adapter_id"]
+def set_together_output_model(record: AdapterRecord, output_model: str) -> None:
+    """Store a Together fine-tuned model ID on a record for direct routing."""
+
+    record.metadata["provider"] = "together"
+    record.metadata["together_output_model"] = output_model
+
+
+__all__ = [
+    "DEFAULT_BASE_MODEL",
+    "DEFAULT_BASE_URL",
+    "TogetherEngine",
+    "set_together_adapter_id",
+    "set_together_output_model",
+]

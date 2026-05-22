@@ -3,8 +3,17 @@
 //! Tauri commands exposed to the webview live in this crate. Native data
 //! ingestion modules (iMessage, Apple Notes, Mail, WhatsApp) live in
 //! `ingest::*` and are called via the commands defined here.
+//!
+//! Personal knowledge graph: `graph::*` defines the typed entities and
+//! `store`; `extract::*` writes to it from each local Mac source;
+//! `synthesis::*` cross-resolves entities and detects themes;
+//! `schedule::*` runs the whole pipeline continuously in the background.
 
 pub mod ingest;
+pub mod graph;
+pub mod extract;
+pub mod synthesis;
+pub mod schedule;
 
 use serde::Serialize;
 
@@ -138,13 +147,17 @@ async fn ingest_imessage(
     if count == 0 {
         return Ok(IngestSummary {
             source: "imessage",
-            source_id: "imessage-empty".to_string(),
+            source_id: "imessage".to_string(),
             items_ingested: 0,
         });
     }
 
-    let now = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-    let source_id = format!("imessage-{now}");
+    // Stable per-kind source_id: re-ingesting overwrites the canonical
+    // raw file (UserStore.save_raw_items defaults to write mode) instead
+    // of appending a new timestamped file every time. Without this the
+    // raw/ directory accumulates duplicates and the curate pipeline
+    // re-processes the same content N times.
+    let source_id = "imessage".to_string();
 
     let body = serde_json::json!({
         "kind": "imessage",
@@ -221,13 +234,13 @@ async fn ingest_mail(
     if count == 0 {
         return Ok(IngestSummary {
             source: "email",
-            source_id: "email-empty".to_string(),
+            source_id: "email".to_string(),
             items_ingested: 0,
         });
     }
 
-    let now = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-    let source_id = format!("email-{now}");
+    // Stable per-kind source_id — see ingest_imessage for rationale.
+    let source_id = "email".to_string();
     post_items(&user_id, "email_mbox", &source_id, items).await?;
     Ok(IngestSummary {
         source: "email",
@@ -274,13 +287,13 @@ async fn ingest_notes(
     if count == 0 {
         return Ok(IngestSummary {
             source: "text",
-            source_id: "notes-empty".to_string(),
+            source_id: "notes".to_string(),
             items_ingested: 0,
         });
     }
 
-    let now = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-    let source_id = format!("notes-{now}");
+    // Stable per-kind source_id — see ingest_imessage for rationale.
+    let source_id = "notes".to_string();
     post_items(&user_id, "text", &source_id, items).await?;
     Ok(IngestSummary {
         source: "text",
@@ -399,6 +412,183 @@ async fn ingest_documents(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Personal knowledge graph commands
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct GraphSummary {
+    root: String,
+    counts: std::collections::HashMap<String, usize>,
+}
+
+fn graph_root_for_user(user_id: &str) -> std::path::PathBuf {
+    // The local dev backend is at `$HOME/.pmc-dev/storage/users/<uid>/graph/`.
+    // We mirror that path here so the agent and the extractors share a store.
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    home.join(".pmc-dev/storage/users").join(user_id).join("graph")
+}
+
+fn watermarks_path_for_user(user_id: &str) -> std::path::PathBuf {
+    graph_root_for_user(user_id).join("_watermarks.json")
+}
+
+/// Open a `GraphStore` for the given user (creating the dir if needed).
+fn open_store(user_id: &str) -> Result<std::sync::Arc<graph::GraphStore>, String> {
+    let root = graph_root_for_user(user_id);
+    graph::GraphStore::new(&root)
+        .map(std::sync::Arc::new)
+        .map_err(|e| format!("graph store: {e}"))
+}
+
+/// Run every extractor + synthesis once. Returns per-source summaries.
+#[tauri::command]
+async fn graph_run_full(user_id: String) -> Result<Vec<extract::ExtractSummary>, String> {
+    let store = open_store(&user_id)?;
+    let watermarks = graph::Watermarks::load(watermarks_path_for_user(&user_id));
+    let (scheduler, _events) = schedule::Scheduler::new(store, watermarks);
+    Ok(scheduler.run_full().await)
+}
+
+/// Wipe every trace of this user — raw data, graph, memory, training
+/// bundles, registered adapter — and return so the webview can clear
+/// its own state and route back to /welcome. The user comes through
+/// the connect flow again as if it were first launch. Irreversible.
+#[tauri::command]
+async fn reset_user(user_id: String) -> Result<(), String> {
+    let url = format!(
+        "{}/v1/users/{}/reset",
+        backend_url(),
+        urlencoding::encode(&user_id),
+    );
+    let response = reqwest::Client::new()
+        .post(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("backend {status}: {text}"));
+    }
+    Ok(())
+}
+
+/// Fire-and-forget graph extraction for the /connect → /reading
+/// handoff. The webview calls this once after the user has connected
+/// their sources; it spawns the full extraction in the background and
+/// returns immediately so the user can advance to /reading while the
+/// graph (contacts, calendar, photos metadata, etc.) populates. The
+/// running scheduler picks up incremental updates from there on.
+///
+/// MUST be `async fn` so we're inside a Tokio runtime context when we
+/// call `tokio::spawn`. A synchronous Tauri command runs on the
+/// webview thread which has no tokio runtime bound — `tokio::spawn`
+/// from there panics → SIGABRT → the whole app dies. Found this the
+/// hard way: app crashed cleanly on /connect → /reading transition.
+#[tauri::command]
+async fn graph_kickoff(user_id: String) -> Result<(), String> {
+    use std::sync::OnceLock;
+    static IN_FLIGHT: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    let set = IN_FLIGHT.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+    {
+        let mut guard = set.lock().map_err(|_| "lock poisoned".to_string())?;
+        if !guard.insert(user_id.clone()) { return Ok(()); }
+    }
+    let user_id_for_task = user_id.clone();
+    tokio::spawn(async move {
+        let store = match open_store(&user_id_for_task) { Ok(s) => s, Err(_) => return };
+        let watermarks = graph::Watermarks::load(watermarks_path_for_user(&user_id_for_task));
+        let (scheduler, _events) = schedule::Scheduler::new(store, watermarks);
+        let _ = scheduler.run_full().await;
+        if let Some(set) = IN_FLIGHT.get() {
+            if let Ok(mut guard) = set.lock() {
+                guard.remove(&user_id_for_task);
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Counts per entity-kind file in the user's graph store. Cheap; used by
+/// the UI to show "what's in the graph" without loading everything.
+#[tauri::command]
+fn graph_counts(user_id: String) -> Result<GraphSummary, String> {
+    let store = open_store(&user_id)?;
+    let mut counts = std::collections::HashMap::new();
+    for kind in [
+        graph::EntityKind::Person, graph::EntityKind::Place,
+        graph::EntityKind::Event, graph::EntityKind::Episode,
+        graph::EntityKind::Project, graph::EntityKind::Theme,
+        graph::EntityKind::OpenLoop, graph::EntityKind::TasteItem,
+        graph::EntityKind::FileSignal, graph::EntityKind::CodeRepo,
+        graph::EntityKind::WebSignal, graph::EntityKind::Edge,
+    ] {
+        counts.insert(kind.filename().to_string(), store.count(kind));
+    }
+    Ok(GraphSummary {
+        root: store.root().to_string_lossy().to_string(),
+        counts,
+    })
+}
+
+/// Sample N entries of one entity kind — for the "let's look at it"
+/// inspection step. Returns raw JSON values for client-side rendering.
+#[tauri::command]
+fn graph_sample(
+    user_id: String,
+    kind: String,
+    limit: usize,
+) -> Result<Vec<serde_json::Value>, String> {
+    let store = open_store(&user_id)?;
+    let ek = match kind.as_str() {
+        "people"     | "person"     => graph::EntityKind::Person,
+        "places"     | "place"      => graph::EntityKind::Place,
+        "events"     | "event"      => graph::EntityKind::Event,
+        "episodes"   | "episode"    => graph::EntityKind::Episode,
+        "projects"   | "project"    => graph::EntityKind::Project,
+        "themes"     | "theme"      => graph::EntityKind::Theme,
+        "open_loops" | "openloop"   => graph::EntityKind::OpenLoop,
+        "taste"      | "tasteitem"  => graph::EntityKind::TasteItem,
+        "files"      | "filesignal" => graph::EntityKind::FileSignal,
+        "repos"      | "coderepo"   => graph::EntityKind::CodeRepo,
+        "web"        | "websignal"  => graph::EntityKind::WebSignal,
+        "edges"      | "edge"       => graph::EntityKind::Edge,
+        _ => return Err(format!("unknown entity kind: {kind}")),
+    };
+    let values: Vec<serde_json::Value> = store
+        .load::<serde_json::Value>(ek)
+        .map_err(|e| format!("load: {e}"))?;
+    Ok(values.into_iter().take(limit.max(1)).collect())
+}
+
+/// Start the always-on background scheduler for this user. Safe to
+/// call multiple times — second-and-later calls are a no-op.
+#[tauri::command]
+fn graph_start_scheduler(user_id: String) -> Result<(), String> {
+    use std::sync::OnceLock;
+    static STARTED: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    let started = STARTED.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+    {
+        let mut s = started.lock().map_err(|_| "lock poisoned".to_string())?;
+        if !s.insert(user_id.clone()) { return Ok(()); }
+    }
+    let store = open_store(&user_id)?;
+    let watermarks = graph::Watermarks::load(watermarks_path_for_user(&user_id));
+    let (scheduler, mut events) = schedule::Scheduler::new(store, watermarks);
+    scheduler.start();
+    // Drain the event stream into stdout for debugging; a future
+    // tauri::AppHandle wire-up will forward to the frontend.
+    tokio::spawn(async move {
+        while let Some(ev) = events.recv().await {
+            let _ = serde_json::to_string(&ev).map(|s| eprintln!("[graph] {s}"));
+        }
+    });
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -416,6 +606,12 @@ pub fn run() {
             notes_status,
             ingest_notes,
             ingest_documents,
+            graph_run_full,
+            graph_kickoff,
+            graph_counts,
+            graph_sample,
+            graph_start_scheduler,
+            reset_user,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

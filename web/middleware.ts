@@ -13,7 +13,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * getSessionByToken on the server).
  *
  * Protected routes (Mac app surfaces): /welcome /connect /curate /train
- * /eval /first-meeting /chat
+ * /eval /first-meeting /chat /actions
  *
  * Public routes (marketing + auth): / /sign-in /download /privacy /terms
  * /contact /other-platforms /api/*
@@ -27,6 +27,7 @@ const PROTECTED_PATHS = [
   "/eval",
   "/first-meeting",
   "/chat",
+  "/actions",
 ];
 
 const SESSION_COOKIE = "pmc_session";
@@ -63,5 +64,7 @@ export const config = {
     "/first-meeting/:path*",
     "/chat",
     "/chat/:path*",
+    "/actions",
+    "/actions/:path*",
   ],
 };

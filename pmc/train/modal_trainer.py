@@ -159,8 +159,7 @@ def _download_adapter_from_volume(user_id: str, run_id: str, local_output: Path)
     local_output.mkdir(parents=True, exist_ok=True)
     volume = modal.Volume.from_name("pmc-adapters")
     prefix = f"{user_id}/{run_id}/adapter"
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
+    with tempfile.TemporaryDirectory():
         # Modal's get_file / read_file API to pull files
         for entry in volume.iterdir(prefix):
             target = local_output / entry.path.split("/")[-1]

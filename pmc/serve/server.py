@@ -19,7 +19,7 @@ from pathlib import Path
 from pmc.serve.engine import InferenceEngine, MockEngine
 from pmc.serve.export import export_adapter_only, export_bundle
 from pmc.serve.memory_context import MemoryContextProvider, enrich_messages
-from pmc.serve.registry import AdapterRegistry
+from pmc.serve.registry import AdapterRecord, AdapterRegistry
 from pmc.serve.schema import (
     ChatCompletionChoice,
     ChatCompletionChunk,
@@ -81,7 +81,7 @@ class PMCServer:
         user_id = request.user or request.model
         record = self.registry.require(user_id)
 
-        if record.base_model != self.engine.base_model:
+        if not self._engine_accepts(record):
             # Engine and adapter must agree on the base. Bail loudly rather than
             # silently producing junk from a mismatched base.
             raise ValueError(
@@ -123,7 +123,7 @@ class PMCServer:
         """Yield OpenAI-style streaming chunks for a chat completion."""
         user_id = request.user or request.model
         record = self.registry.require(user_id)
-        if record.base_model != self.engine.base_model:
+        if not self._engine_accepts(record):
             raise ValueError(
                 f"Adapter for {user_id!r} expects base {record.base_model!r}, "
                 f"engine is serving {self.engine.base_model!r}"
@@ -226,3 +226,11 @@ class PMCServer:
         """Unregister and optionally hard-delete the adapter + bundle on disk."""
         self.engine.evict(user_id)
         return self.registry.unregister(user_id, delete_files=delete_files)
+
+    def _engine_accepts(self, record: AdapterRecord) -> bool:
+        if record.base_model == self.engine.base_model:
+            return True
+        allows = getattr(self.engine, "allows_base_model", None)
+        if callable(allows):
+            return bool(allows(record.base_model, record))
+        return False
