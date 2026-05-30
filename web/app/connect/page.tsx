@@ -6,15 +6,12 @@ import { useRouter } from "next/navigation";
 import ConnectScreen from "@/components/app/connect-screen";
 import { PermissionsScreen } from "@/components/app/permissions-screen";
 import { useUser } from "@/hooks/use-user";
-import { getRuntimeCapabilities } from "@/lib/api/client";
 import { NATIVE_INGEST, ingestDocuments, isTauri } from "@/lib/runtime";
 
 const PMC_API_URL =
   process.env.NEXT_PUBLIC_PMC_API_URL ??
   process.env.NEXT_PUBLIC_API_URL ??
   "http://localhost:8000";
-const PMC_RUN_MODE = (process.env.NEXT_PUBLIC_PMC_RUN_MODE ?? "").toLowerCase();
-const PMC_BASE_MODEL = process.env.NEXT_PUBLIC_PMC_BASE_MODEL ?? "frontier";
 
 type SourceState = "idle" | "connecting" | "connected";
 
@@ -220,62 +217,24 @@ export default function ConnectPage() {
   const handleContinue = useCallback(async () => {
     setError(null);
     // Kick off graph extraction (contacts, calendar, photos metadata,
-    // safari, files, etc.) in the background. This builds the
-    // "memory" half of /reading while curate + training run. It's
-    // fire-and-forget: the Tauri command returns immediately and the
-    // scheduler does the work async. Safe to no-op when not in Tauri.
+    // safari, files, etc.) in the background. The Tauri command returns
+    // immediately; the /reading page polls /v1/users/{id}/status to
+    // surface progress.
+    //
+    // Phase 1.1: training pipeline runs are disconnected from the active
+    // flow. The new product is structured-graph + BYO frontier agent,
+    // not a fine-tuned model. /v1/users/{id}/runs and the
+    // /curate → /train → /eval → /chat screens are preserved in code
+    // but unreachable from this route.
     try {
       if (inApp) {
         const { invoke } = await import("@tauri-apps/api/core");
         await invoke("graph_kickoff", { userId });
       }
     } catch {
-      // Graph kickoff is non-essential — never block /connect → /curate.
+      // Graph kickoff is non-essential — never block the user.
     }
-    try {
-      const wantsRealTraining =
-        PMC_RUN_MODE === "real" ||
-        PMC_RUN_MODE === "train" ||
-        (!PMC_RUN_MODE && inApp);
-      const caps = await getRuntimeCapabilities();
-      if (
-        wantsRealTraining &&
-        (caps.training.provider !== "together" || !caps.training.available)
-      ) {
-        throw new Error(
-          caps.training.unavailable_reason ??
-            "Together training is not configured on the backend",
-        );
-      }
-      const realTraining = wantsRealTraining;
-      const res = await fetch(
-        `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/runs`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            base_model: PMC_BASE_MODEL,
-            skip_train: !realTraining,
-            // The user-facing eval is the private verification loop. Automatic
-            // benchmark eval can come back once the Together generator is wired.
-            skip_eval: true,
-            skip_deploy: !realTraining,
-            require_verification_to_deploy: realTraining,
-          }),
-        },
-      );
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      }
-      const data = (await res.json()) as { job_id: string };
-      router.push(
-        `/curate?job=${encodeURIComponent(data.job_id)}&user=${encodeURIComponent(userId)}`,
-      );
-    } catch (e) {
-      setError(
-        `Couldn't start: ${e instanceof Error ? e.message : String(e)}. Is the backend running?`,
-      );
-    }
+    router.push("/reading");
   }, [router, userId, inApp]);
 
   return (

@@ -41,6 +41,23 @@ class Account:
     id: str
     email: str
     created_at: datetime
+    stripe_customer_id: Optional[str] = None
+    subscription_status: Optional[str] = None
+    subscription_tier: Optional[str] = None
+    subscription_current_period_end: Optional[datetime] = None
+
+    def is_subscribed(self) -> bool:
+        """Active or trialing subscription that hasn't lapsed. Bills run
+        only when this is True (or the user is a founder)."""
+        if self.subscription_status not in ("active", "trialing"):
+            return False
+        # If we know the period end and it's in the past, treat as lapsed.
+        # Stripe normally flips status to past_due / canceled itself, but
+        # protect against missed webhook events.
+        if self.subscription_current_period_end is not None:
+            if self.subscription_current_period_end < _utcnow():
+                return False
+        return True
 
 
 @dataclass
@@ -80,7 +97,11 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
-    created_at TIMESTAMP NOT NULL
+    created_at TIMESTAMP NOT NULL,
+    stripe_customer_id TEXT,
+    subscription_status TEXT,
+    subscription_tier TEXT,
+    subscription_current_period_end TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS account_sessions (
@@ -155,6 +176,28 @@ class AuthStore:
         with self._connect() as conn:
             for stmt in statements:
                 conn.execute(_translate_sql(stmt + ";", self.kind))
+            self._migrate_accounts_for_billing(conn)
+
+    def _migrate_accounts_for_billing(self, conn) -> None:
+        """Add billing columns to existing `accounts` tables.
+
+        CREATE TABLE IF NOT EXISTS won't add new columns to a pre-existing
+        table, so run idempotent ALTER TABLE ADD COLUMN for each billing
+        field. Both sqlite and Postgres treat duplicate-column errors as
+        non-fatal; swallow them so re-runs work.
+        """
+        cols = [
+            ("stripe_customer_id", "TEXT"),
+            ("subscription_status", "TEXT"),
+            ("subscription_tier", "TEXT"),
+            ("subscription_current_period_end", "TIMESTAMP"),
+        ]
+        for name, sql_type in cols:
+            try:
+                conn.execute(f"ALTER TABLE accounts ADD COLUMN {name} {sql_type};")
+            except Exception:
+                # Already present — both backends raise; safe to ignore.
+                pass
 
     # ---- account operations ----
 
@@ -166,7 +209,7 @@ class AuthStore:
             raise ValueError("invalid email")
         with self._connect() as conn:
             row = conn.execute(
-                _translate_sql("SELECT id, email, created_at FROM accounts WHERE email = %s", self.kind),
+                _translate_sql(_ACCOUNT_SELECT + " WHERE email = %s", self.kind),
                 (email_lc,),
             ).fetchone()
             if row:
@@ -185,10 +228,59 @@ class AuthStore:
     def get_account_by_id(self, account_id: str) -> Optional[Account]:
         with self._connect() as conn:
             row = conn.execute(
-                _translate_sql("SELECT id, email, created_at FROM accounts WHERE id = %s", self.kind),
+                _translate_sql(_ACCOUNT_SELECT + " WHERE id = %s", self.kind),
                 (account_id,),
             ).fetchone()
             return _row_to_account(row, self.kind) if row else None
+
+    def get_account_by_stripe_customer(self, customer_id: str) -> Optional[Account]:
+        """Reverse-lookup for webhook handlers — Stripe events carry the
+        customer id, not our internal account id."""
+        with self._connect() as conn:
+            row = conn.execute(
+                _translate_sql(
+                    _ACCOUNT_SELECT + " WHERE stripe_customer_id = %s", self.kind
+                ),
+                (customer_id,),
+            ).fetchone()
+            return _row_to_account(row, self.kind) if row else None
+
+    # ---- billing operations ----
+
+    def set_stripe_customer_id(self, account_id: str, customer_id: str) -> None:
+        """Persist Stripe's customer id on the account. Idempotent —
+        overwrites any prior value (the same email/account should never
+        hold two customers, but if Stripe were to issue one we'd want the
+        latest)."""
+        with self._connect() as conn:
+            conn.execute(
+                _translate_sql(
+                    "UPDATE accounts SET stripe_customer_id = %s WHERE id = %s",
+                    self.kind,
+                ),
+                (customer_id, account_id),
+            )
+
+    def update_subscription_state(
+        self,
+        account_id: str,
+        *,
+        status: Optional[str],
+        tier: Optional[str],
+        current_period_end: Optional[datetime],
+    ) -> None:
+        """Write subscription state from a Stripe webhook. Pass None to
+        clear (canceled / deleted subscription)."""
+        with self._connect() as conn:
+            conn.execute(
+                _translate_sql(
+                    "UPDATE accounts SET subscription_status = %s, "
+                    "subscription_tier = %s, "
+                    "subscription_current_period_end = %s WHERE id = %s",
+                    self.kind,
+                ),
+                (status, tier, current_period_end, account_id),
+            )
 
     # ---- login code operations ----
 
@@ -420,8 +512,20 @@ def _get(row, idx, key):
 
 
 def _row_to_account(row, kind: str) -> Account:
+    period_end = _get(row, 6, "subscription_current_period_end")
     return Account(
         id=_get(row, 0, "id"),
         email=_get(row, 1, "email"),
         created_at=_coerce_dt(_get(row, 2, "created_at")),
+        stripe_customer_id=_get(row, 3, "stripe_customer_id"),
+        subscription_status=_get(row, 4, "subscription_status"),
+        subscription_tier=_get(row, 5, "subscription_tier"),
+        subscription_current_period_end=_coerce_dt(period_end) if period_end else None,
     )
+
+
+_ACCOUNT_SELECT = (
+    "SELECT id, email, created_at, stripe_customer_id, "
+    "subscription_status, subscription_tier, subscription_current_period_end "
+    "FROM accounts"
+)

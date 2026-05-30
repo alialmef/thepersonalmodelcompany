@@ -225,27 +225,30 @@ def sign_out(auth: AuthSession = Depends(require_session), request: Request = No
 
 
 def _account_dict(account: Account) -> dict:
+    cpe = account.subscription_current_period_end
     return {
         "id": account.id,
         "email": account.email,
         "created_at": account.created_at.isoformat(),
+        "subscription": {
+            "is_subscribed": account.is_subscribed(),
+            "status": account.subscription_status,
+            "tier": account.subscription_tier,
+            "current_period_end": cpe.isoformat() if cpe else None,
+        },
     }
 
 
 def _account_by_email(store: AuthStore, email: str) -> Optional[Account]:
-    """Look up by email without creating. We touch the store's
-    private cursor by going through get_or_create + comparing — but
-    that creates, so we do a direct query via the connection."""
+    """Look up by email without lazy-creating. Goes through the store's
+    private connection so the result carries the full billing column
+    set (the `accounts` row includes subscription state)."""
+    from pmc.auth.store import _ACCOUNT_SELECT, _row_to_account
     with store._connect() as conn:  # type: ignore[attr-defined]
-        sql = "SELECT id, email, created_at FROM accounts WHERE email = %s"
+        sql = _ACCOUNT_SELECT + " WHERE email = %s"
         if store.kind == "sqlite":
             sql = sql.replace("%s", "?")
         row = conn.execute(sql, (email,)).fetchone()
         if not row:
             return None
-        from pmc.auth.store import _coerce_dt, _get
-        return Account(
-            id=_get(row, 0, "id"),
-            email=_get(row, 1, "email"),
-            created_at=_coerce_dt(_get(row, 2, "created_at")),
-        )
+        return _row_to_account(row, store.kind)

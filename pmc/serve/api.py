@@ -48,13 +48,23 @@ def create_app(
     `["http://localhost:3000"]` for local Next.js dev.
     """
     try:
-        from fastapi import FastAPI, Form, HTTPException, Query, UploadFile, File
+        from fastapi import (
+            Depends,
+            FastAPI,
+            File,
+            Form,
+            HTTPException,
+            Query,
+            UploadFile,
+        )
         from fastapi.responses import FileResponse, StreamingResponse
         from fastapi.middleware.cors import CORSMiddleware
     except ImportError as e:
         raise ImportError(
             "fastapi is required to build the API. Install with `pip install pmc[serve]`."
         ) from e
+
+    from pmc.auth.middleware import optional_session
 
     app = FastAPI(title="PMC — Personal Model Company", version="0.1.0")
 
@@ -321,6 +331,15 @@ def create_app(
         # First-100-users free Try-tier training (per project-founder-pricing memory)
         founders = FounderTracker(storage_root)
 
+        # Billing — Stripe glue. Mounted unconditionally; individual
+        # endpoints fail with a clear 503 if STRIPE_SECRET_KEY isn't set,
+        # so the frontend can distinguish "not wired" from "declined".
+        if hasattr(app.state, "auth_store"):
+            from pmc.billing import BillingService
+            from pmc.billing.router import build_billing_router
+            app.state.billing_service = BillingService(app.state.auth_store)
+            app.include_router(build_billing_router(founders=founders))
+
         @app.post("/v1/users/{user_id}/sources/upload")
         async def upload_source(
             user_id: str,
@@ -476,8 +495,22 @@ def create_app(
         def submit_run(
             user_id: str,
             body: Optional[dict[str, Any]] = None,
+            auth: Any = Depends(optional_session),
         ) -> dict[str, Any]:
             """Submit a pipeline run for this user.
+
+            Gated on payment-or-founder. The caller must be one of:
+              - an active subscriber (Stripe subscription_status =
+                'active' or 'trialing'), OR
+              - a founder (one of the first 100 to ever fire a run for
+                this user_id), OR
+              - the dry-run path (no Together spend, no gate)
+
+            If a session is presented, the gate consults *the signed-in
+            account's* subscription state — so when an account claims a
+            pmc_user_id, the user_id's runs inherit the account's paid
+            status. Anonymous calls (no session) only pass when the
+            user_id has founder slots remaining.
 
             Body fields (all optional):
               base_model: str  — override default tier
@@ -512,6 +545,28 @@ def create_app(
                         data={
                             "slots_remaining": grant.slots_remaining,
                             "total_slots": founders.total_slots,
+                        },
+                    )
+
+            # Payment gate. Skipped for dry runs (validates pipeline
+            # without spending compute). Otherwise: subscription OR
+            # founder is required.
+            if not config.dry_run:
+                is_subscribed = bool(auth and auth.account.is_subscribed())
+                is_founder_now = (
+                    bool(grant and grant.is_founder)
+                    or founders.is_founder(user_id)
+                )
+                if not (is_subscribed or is_founder_now):
+                    raise HTTPException(
+                        status_code=402,
+                        detail={
+                            "error": "payment_required",
+                            "message": (
+                                "Subscribe to train a model. "
+                                "Hit POST /v1/billing/checkout to start."
+                            ),
+                            "checkout_url": "/v1/billing/checkout",
                         },
                     )
 

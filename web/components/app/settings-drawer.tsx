@@ -5,9 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Settings as SettingsIcon,
   X,
-  RotateCcw,
   Database,
-  Download,
   LogOut,
   ChevronRight,
 } from "lucide-react";
@@ -15,16 +13,14 @@ import { BrandMark } from "@/components/shared/brand-mark";
 import { useUser, clearUserCache } from "@/hooks/use-user";
 
 /**
- * The settings drawer that slides in from the right of the chat surface.
+ * Settings drawer.
  *
- * Where "you own it" gets concrete:
- *   - Manage sources → return to /connect, view + add data sources
- *   - Train another → kick a fresh training run
- *   - Export bundle → download the adapter + manifest + eval
- *   - Sign out
+ * Phase 1.1 cleanup: training-related rows ("Train another", "Export
+ * bundle") removed from the surface. The underlying retrain + export
+ * endpoints still exist in the backend but aren't reachable from the
+ * active flow now that the product has moved off voice fine-tuning.
  *
  * Linear-quiet aesthetic: thin separators, system greys, no nav chrome.
- * Press the gear to open, click outside or X to dismiss.
  */
 export function SettingsDrawer({
   open,
@@ -35,8 +31,8 @@ export function SettingsDrawer({
 }) {
   const router = useRouter();
   const { user } = useUser();
-  const [busy, setBusy] = useState<null | "retrain" | "signout" | "export">(null);
-  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<null | "signout">(null);
+  const [error] = useState<string | null>(null);
 
   // Esc closes
   useEffect(() => {
@@ -48,33 +44,6 @@ export function SettingsDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  async function retrain() {
-    if (!user) return;
-    setBusy("retrain");
-    setError(null);
-    try {
-      const apiUrl =
-        process.env.NEXT_PUBLIC_PMC_API_URL ?? "http://localhost:8000";
-      const res = await fetch(
-        `${apiUrl}/v1/users/${encodeURIComponent(user.pmcUserId)}/runs`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ skip_eval: true, skip_deploy: false }),
-        },
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { job_id: string };
-      onClose();
-      router.push(
-        `/curate?job=${encodeURIComponent(data.job_id)}&user=${encodeURIComponent(user.pmcUserId)}`,
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't start training.");
-      setBusy(null);
-    }
-  }
-
   async function signOut() {
     setBusy("signout");
     try {
@@ -84,19 +53,6 @@ export function SettingsDrawer({
     } catch {
       setBusy(null);
     }
-  }
-
-  function exportBundle() {
-    if (!user) return;
-    const apiUrl =
-      process.env.NEXT_PUBLIC_PMC_API_URL ?? "http://localhost:8000";
-    // Trigger a download via a hidden anchor. The backend streams a zip.
-    const a = document.createElement("a");
-    a.href = `${apiUrl}/v1/models/${encodeURIComponent(user.pmcUserId)}/export`;
-    a.download = "personal_model_bundle.zip";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
   }
 
   return (
@@ -148,7 +104,7 @@ export function SettingsDrawer({
 
           <div className="mb-6">
             <p className="text-[10px] uppercase tracking-[0.08em] text-neutral-500 mb-3">
-              Your model
+              Your data
             </p>
             <div className="flex flex-col gap-px overflow-hidden rounded-[10px] border-[0.5px] border-neutral-200 bg-neutral-200">
               <Row
@@ -159,19 +115,6 @@ export function SettingsDrawer({
                   onClose();
                   router.push("/connect");
                 }}
-              />
-              <Row
-                icon={<RotateCcw className="size-4" strokeWidth={1.5} />}
-                label="Train another"
-                detail="Retrain on the latest curated data."
-                onClick={retrain}
-                busy={busy === "retrain"}
-              />
-              <Row
-                icon={<Download className="size-4" strokeWidth={1.5} />}
-                label="Export bundle"
-                detail="Download the adapter, manifest, and eval."
-                onClick={exportBundle}
               />
             </div>
           </div>

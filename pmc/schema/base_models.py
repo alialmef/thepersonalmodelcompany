@@ -148,20 +148,31 @@ MODEL_REGISTRY: dict[str, BaseModelSpec] = {
         context_length=262144,
         agentic_grade=AgenticGrade.FRONTIER,
         multimodal=False,
-        together_supported=False,  # Fireworks Day 0; Together status TBD
-        serving_compute="8xH100",
+        together_supported=True,
+        serving_compute="serverless (Together FP4)",
         default_adapter_rank=64,
-        estimated_training_usd=120.00,
-        estimated_per_million_tokens_usd=3.50,
-        subscription_usd_per_month=299.00,
+        # Together-side cost of one LoRA fine-tune. Roughly tokens-of-data
+        # × $X per million; the exact figure depends on dataset size and
+        # epochs. $40 is a comfortable budget cap for V1 datasets (~10k
+        # curated conversations, 1-2 epochs).
+        estimated_training_usd=40.00,
+        # Weighted blended rate. Together (2026-05): input $1.20/M,
+        # cached input $0.20/M, output $4.50/M. Real-world traffic skews
+        # heavily to cached input (memory recall) so the blended cost
+        # per million is closer to ~$1.50.
+        estimated_per_million_tokens_usd=1.50,
+        subscription_usd_per_month=50.00,
         license="Modified MIT",
         license_url="https://github.com/moonshotai/Kimi-K2",
         notes=(
-            "FRONTIER tier ($299/mo). Best open agentic model in the world. Ties Opus 4.7 "
-            "on HLE-with-tools, leads GPT-5.4 on SWE-Pro. 200-300 sequential tool calls, "
-            "300 sub-agent swarms. Native INT4. Modified MIT — effectively MIT under "
-            "100M MAU. Requires dedicated 8xH100 INT4 (~$15-20K/mo) — commit only after "
-            "~50 paying Frontier users confirm demand."
+            "Single PMC product ($50/mo). Best open agentic model in the world: "
+            "ties Opus 4.7 on HLE-with-tools, leads GPT-5.4 on SWE-Pro, 200-300 "
+            "sequential tool calls, 300 sub-agent swarms. 256K context. "
+            "Together hosts the FP4 quantization SERVERLESSLY (pay-per-token, no "
+            "dedicated endpoint) and accepts LoRA fine-tunes against it — "
+            "verified 2026-05-27 via /v1/fine-tunes probe. Pricing: $1.20 input / "
+            "$4.50 output / $0.20 cached input per million tokens, $0/hr base. "
+            "Margin holds for ~95% of users with a 10M-output/mo soft cap."
         ),
     ),
 }
