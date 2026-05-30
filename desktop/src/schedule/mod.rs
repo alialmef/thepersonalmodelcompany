@@ -39,6 +39,10 @@ pub enum Source {
     ScreenTime,
     Shell,
     Locations,
+    // Phase 2 wave 2
+    EditorState,
+    Notifications,
+    VoiceMemos,
 }
 
 impl Source {
@@ -61,7 +65,10 @@ impl Source {
             CallHistory     => StdDuration::from_secs(60 * 60),
             Files           => StdDuration::from_secs(60 * 60),
             Shell           => StdDuration::from_secs(60 * 60),
+            Notifications   => StdDuration::from_secs(60 * 60),
+            EditorState     => StdDuration::from_secs(60 * 60),
             Locations       => StdDuration::from_secs(2 * 60 * 60),
+            VoiceMemos      => StdDuration::from_secs(2 * 60 * 60),
             // Slow:
             Music           => StdDuration::from_secs(24 * 60 * 60),
         }
@@ -84,6 +91,9 @@ impl Source {
             Source::ScreenTime      => "screen_time",
             Source::Shell           => "shell",
             Source::Locations       => "locations",
+            Source::EditorState     => "editor_state",
+            Source::Notifications   => "notifications",
+            Source::VoiceMemos      => "voice_memos",
         }
     }
 
@@ -91,7 +101,8 @@ impl Source {
         use Source::*;
         &[Contacts, ImessageEnrich, Calendar, Photos, Safari, CallHistory,
           Music, Files, MailEnrich, NotesEnrich, Reminders,
-          Chrome, ScreenTime, Shell, Locations]
+          Chrome, ScreenTime, Shell, Locations,
+          EditorState, Notifications, VoiceMemos]
     }
 }
 
@@ -273,5 +284,8 @@ fn dispatch(source: Source, ctx: &ExtractCtx) -> Result<ExtractSummary, extract:
         Source::ScreenTime      => screen_time::run(ctx),
         Source::Shell           => shell::run(ctx),
         Source::Locations       => locations::run(ctx),
+        Source::EditorState     => editor_state::run(ctx),
+        Source::Notifications   => notifications::run(ctx),
+        Source::VoiceMemos      => voice_memos::run(ctx),
     }
 }
