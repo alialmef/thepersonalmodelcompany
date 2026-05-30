@@ -3183,6 +3183,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "openai" },
     { name = "psycopg", extra = ["binary"] },
@@ -3253,6 +3254,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.25" },
     { name = "beautifulsoup4", marker = "extra == 'ingest'", specifier = ">=4.12" },
     { name = "bitsandbytes", marker = "extra == 'train'", specifier = ">=0.43" },
+    { name = "cryptography", specifier = ">=42.0" },
     { name = "datasets", marker = "extra == 'train'", specifier = ">=2.19" },
     { name = "fastapi", specifier = ">=0.111" },
     { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.111" },

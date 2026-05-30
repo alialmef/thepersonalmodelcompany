@@ -340,6 +340,15 @@ def create_app(
             app.state.billing_service = BillingService(app.state.auth_store)
             app.include_router(build_billing_router(founders=founders))
 
+        # Agent (BYOM) — bring-your-own frontier-model. /v1/agent/* routes
+        # let the user pick provider + model + paste their API key, and
+        # proxies chat through whichever provider they chose. Individual
+        # endpoints fail with a clear 503 if PMC_KEY_ENCRYPTION_SECRET
+        # isn't set on the deploy.
+        if hasattr(app.state, "auth_store"):
+            from pmc.agent.router import build_agent_router
+            app.include_router(build_agent_router())
+
         @app.post("/v1/users/{user_id}/sources/upload")
         async def upload_source(
             user_id: str,
