@@ -22,6 +22,10 @@ pub mod chrome;
 pub mod screen_time;
 pub mod shell;
 pub mod locations;
+// Phase 2 wave 2
+pub mod editor_state;
+pub mod notifications;
+pub mod voice_memos;
 
 use crate::graph::{GraphStore, Watermarks};
 use std::sync::Arc;

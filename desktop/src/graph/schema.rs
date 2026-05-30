@@ -296,6 +296,20 @@ pub struct ShellCommand {
     pub category: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationSignal {
+    pub id: String,
+    pub bundle_id: String,
+    pub display_name: Option<String>,
+    pub count_30d: u64,
+    pub count_180d: u64,
+    pub last_received: Option<DateTime<Utc>>,
+    /// Same buckets as AppUsage so the synthesis layer can correlate
+    /// (a phone full of social notifications correlates with social
+    /// app usage, etc.)
+    pub category: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Edges (cross-source links)
 // ---------------------------------------------------------------------------
@@ -331,6 +345,7 @@ pub enum EntityKind {
     WebSignal,
     AppUsage,
     ShellCommand,
+    NotificationSignal,
     Edge,
 }
 
@@ -350,6 +365,7 @@ impl EntityKind {
             EntityKind::WebSignal => "web.jsonl",
             EntityKind::AppUsage => "app_usage.jsonl",
             EntityKind::ShellCommand => "shell.jsonl",
+            EntityKind::NotificationSignal => "notifications.jsonl",
             EntityKind::Edge => "edges.jsonl",
         }
     }
