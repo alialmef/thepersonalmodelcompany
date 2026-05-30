@@ -114,7 +114,13 @@ export default function RightNowPage() {
           </div>
         </div>
 
-        <div className="mt-auto pt-16">
+        <div className="mt-auto flex flex-wrap items-center gap-6 pt-16">
+          <Link
+            href="/settings/agent"
+            className="text-sm text-foreground/55 hover:text-foreground/85"
+          >
+            Configure agent
+          </Link>
           <Link
             href="/connect"
             className="text-sm text-foreground/45 hover:text-foreground/75"

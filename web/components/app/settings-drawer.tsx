@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Settings as SettingsIcon,
   X,
+  Cpu,
   Database,
   LogOut,
   ChevronRight,
@@ -101,6 +102,23 @@ export function SettingsDrawer({
               <p className="text-[13px] text-neutral-900 truncate">{user.email}</p>
             </div>
           )}
+
+          <div className="mb-6">
+            <p className="text-[10px] uppercase tracking-[0.08em] text-neutral-500 mb-3">
+              Agent
+            </p>
+            <div className="flex flex-col gap-px overflow-hidden rounded-[10px] border-[0.5px] border-neutral-200 bg-neutral-200">
+              <Row
+                icon={<Cpu className="size-4" strokeWidth={1.5} />}
+                label="Configure agent"
+                detail="Pick the frontier model and key it uses."
+                onClick={() => {
+                  onClose();
+                  router.push("/settings/agent");
+                }}
+              />
+            </div>
+          </div>
 
           <div className="mb-6">
             <p className="text-[10px] uppercase tracking-[0.08em] text-neutral-500 mb-3">
