@@ -26,6 +26,10 @@ dependencies = [
     # Magic-link email delivery via Resend. Falls back to console
     # logging if RESEND_API_KEY isn't set.
     "resend>=0.7",
+    # Stripe for subscription billing — Frontier monthly. SDK is
+    # imported lazily by pmc.billing.service so missing keys don't
+    # break boot, only the billing endpoints.
+    "stripe>=8.0",
 ]
 
 [project.scripts]

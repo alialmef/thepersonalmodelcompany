@@ -33,7 +33,18 @@ struct AppInfo {
 }
 
 fn backend_url() -> String {
-    std::env::var("PMC_API_URL").unwrap_or_else(|_| "http://localhost:8000".to_string())
+    // Runtime override for `cargo tauri dev` and locally-launched binaries.
+    if let Ok(v) = std::env::var("PMC_API_URL") {
+        if !v.is_empty() {
+            return v;
+        }
+    }
+    // Compile-time bake. release.sh exports PMC_API_URL before invoking
+    // `cargo tauri build`, so the shipped binary embeds the prod URL and
+    // the user doesn't need any env set when double-clicking the app.
+    option_env!("PMC_API_URL")
+        .unwrap_or("http://localhost:8000")
+        .to_string()
 }
 
 /// Identity info for the webview. Frontend uses this to detect Tauri mode

@@ -39,6 +39,14 @@ WEB_DIR="$REPO_ROOT/web"
 NOTARY_PROFILE="pmc-notary"
 SIGNING_IDENTITY="Developer ID Application: Ali Almeflehi (XQGY763JPD)"
 
+# Backend URL the shipped app talks to. Baked into the Rust binary at
+# compile time (option_env! in desktop/src/lib.rs) and into the Next.js
+# bundle via NEXT_PUBLIC_*. Override locally by exporting PMC_API_URL
+# before invoking this script (e.g. for a staging-pointed test build).
+export PMC_API_URL="${PMC_API_URL:-https://thepersonalmodelcompany-backend-production.up.railway.app}"
+export NEXT_PUBLIC_PMC_API_URL="$PMC_API_URL"
+export NEXT_PUBLIC_API_URL="$PMC_API_URL"
+
 # Web destination — keep filename stable so the landing CTA doesn't break.
 WEB_DEST="$WEB_DIR/public/downloads/PersonalModelCompany.dmg"
 
@@ -68,7 +76,11 @@ ok "cargo available"
 
 # ----- build -----------------------------------------------------------------
 bold "▸ Building & signing"
+bold "  PMC_API_URL → $PMC_API_URL"
 cd "$DESKTOP_DIR"
+# Clear stale bundle/binary so cargo doesn't ship a previous build (this
+# bit us once when an older binary was repackaged with a fresh dmg shell).
+rm -rf target/release/bundle target/release/pmc-desktop
 cargo tauri build
 ok "Build complete"
 

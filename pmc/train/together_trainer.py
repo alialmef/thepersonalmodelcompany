@@ -57,24 +57,27 @@ logger = logging.getLogger(__name__)
 # best-documented Kimi LoRA target on Together as of May 2026.
 DEFAULT_BASE = "moonshotai/Kimi-K2-Instruct-0905"
 
-# Map PMC's internal model ids (used in the tier registry) to the model
-# names Together's fine-tuning endpoint accepts. Without this, the
-# FRONTIER-tier flow asks for `moonshotai/Kimi-K2.6` which Together
-# doesn't currently host for LoRA — we'd want to fail loudly there
-# rather than silently fall back, but for V0 we coerce to the
-# best-supported alternative and log a warning.
+# Map PMC's internal model ids to the model names Together actually
+# serves. Verified against /v1/models on 2026-05-27:
+#   - moonshotai/Kimi-K2.6 is live, serverless (FP4), $1.20/$4.50 per M.
+#   - The prior `Kimi-K2-Instruct-0905` returns 404 — Together rotated.
+#   - Llama-3.1-8B-Reference is also gone; closest serverless host with
+#     LoRA fine-tuning support is Llama-3.3-70B-Instruct-Turbo.
+#   - Qwen3.6-27B was never on Together; closest peer is the 235B MoE.
 TOGETHER_MODEL_ALIASES: dict[str, str] = {
-    "moonshotai/Kimi-K2.6":           "moonshotai/Kimi-K2-Instruct-0905",
-    "moonshotai/Kimi-K2":             "moonshotai/Kimi-K2-Instruct-0905",
-    "kimi-k2.6":                       "moonshotai/Kimi-K2-Instruct-0905",
-    "kimi-k2":                         "moonshotai/Kimi-K2-Instruct-0905",
-    "kimi":                            "moonshotai/Kimi-K2-Instruct-0905",
-    "frontier":                        "moonshotai/Kimi-K2-Instruct-0905",
-    "Qwen/Qwen3.6-27B":               "Qwen/Qwen2.5-72B-Instruct",
-    "qwen3.6-27b":                    "Qwen/Qwen2.5-72B-Instruct",
-    "personal":                        "Qwen/Qwen2.5-72B-Instruct",
-    "meta-llama/Llama-3.1-8B-Instruct": "meta-llama/Llama-3.1-8B-Instruct-Reference",
-    "try":                             "meta-llama/Llama-3.1-8B-Instruct-Reference",
+    "moonshotai/Kimi-K2.6":             "moonshotai/Kimi-K2.6",
+    "moonshotai/Kimi-K2":               "moonshotai/Kimi-K2.6",
+    "kimi-k2.6":                         "moonshotai/Kimi-K2.6",
+    "kimi-k2":                           "moonshotai/Kimi-K2.6",
+    "kimi":                              "moonshotai/Kimi-K2.6",
+    "frontier":                          "moonshotai/Kimi-K2.6",
+    # Fallbacks — kept so test fixtures + the Personal/Try tier registry
+    # entries don't 404. These are live + LoRA-fine-tunable on Together.
+    "Qwen/Qwen3.6-27B":                 "Qwen/Qwen3-235B-A22B-Instruct-2507-tput",
+    "qwen3.6-27b":                       "Qwen/Qwen3-235B-A22B-Instruct-2507-tput",
+    "personal":                          "Qwen/Qwen3-235B-A22B-Instruct-2507-tput",
+    "meta-llama/Llama-3.1-8B-Instruct":  "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "try":                               "meta-llama/Llama-3.3-70B-Instruct-Turbo",
 }
 
 
