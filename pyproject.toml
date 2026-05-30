@@ -30,6 +30,10 @@ dependencies = [
     # imported lazily by pmc.billing.service so missing keys don't
     # break boot, only the billing endpoints.
     "stripe>=8.0",
+    # At-rest encryption for user-supplied BYOM API keys
+    # (Anthropic / OpenAI / Google / OpenRouter). Fernet wraps the
+    # keys with a server-side-derived secret. See pmc/agent/crypto.py.
+    "cryptography>=42.0",
 ]
 
 [project.scripts]

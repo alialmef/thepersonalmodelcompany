@@ -130,6 +130,14 @@ CREATE TABLE IF NOT EXISTS account_login_codes (
     consumed_at TIMESTAMP,
     PRIMARY KEY (account_id)
 );
+
+CREATE TABLE IF NOT EXISTS account_provider_configs (
+    account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    api_key_ciphertext TEXT NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
 """
 
 
@@ -259,6 +267,75 @@ class AuthStore:
                     self.kind,
                 ),
                 (customer_id, account_id),
+            )
+
+    # ---- provider config (BYOM) operations ----
+
+    def set_provider_config(
+        self,
+        account_id: str,
+        *,
+        provider: str,
+        model: str,
+        api_key_ciphertext: str,
+    ) -> None:
+        """Store/replace the user's provider+model+encrypted-key choice.
+
+        Idempotent — overwrites any prior config for this account.
+        Plaintext keys must never reach this layer; the caller is
+        responsible for encrypting via pmc.agent.crypto before calling.
+        """
+        now = _utcnow()
+        with self._connect() as conn:
+            # UPSERT — sqlite's INSERT OR REPLACE works for both backends
+            # via DELETE-then-INSERT to keep dialect overhead minimal.
+            conn.execute(
+                _translate_sql(
+                    "DELETE FROM account_provider_configs WHERE account_id = %s",
+                    self.kind,
+                ),
+                (account_id,),
+            )
+            conn.execute(
+                _translate_sql(
+                    "INSERT INTO account_provider_configs "
+                    "(account_id, provider, model, api_key_ciphertext, updated_at) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    self.kind,
+                ),
+                (account_id, provider, model, api_key_ciphertext, now),
+            )
+
+    def get_provider_config(self, account_id: str) -> Optional[dict]:
+        """Return the stored (provider, model, ciphertext, updated_at)
+        as a dict, or None if the user hasn't configured a provider yet.
+        Caller decrypts the ciphertext just-in-time per request."""
+        with self._connect() as conn:
+            row = conn.execute(
+                _translate_sql(
+                    "SELECT provider, model, api_key_ciphertext, updated_at "
+                    "FROM account_provider_configs WHERE account_id = %s",
+                    self.kind,
+                ),
+                (account_id,),
+            ).fetchone()
+            if not row:
+                return None
+            return {
+                "provider": _get(row, 0, "provider"),
+                "model": _get(row, 1, "model"),
+                "api_key_ciphertext": _get(row, 2, "api_key_ciphertext"),
+                "updated_at": _coerce_dt(_get(row, 3, "updated_at")),
+            }
+
+    def clear_provider_config(self, account_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                _translate_sql(
+                    "DELETE FROM account_provider_configs WHERE account_id = %s",
+                    self.kind,
+                ),
+                (account_id,),
             )
 
     def update_subscription_state(
