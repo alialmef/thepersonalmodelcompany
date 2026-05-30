@@ -34,6 +34,11 @@ pub enum Source {
     MailEnrich,
     NotesEnrich,
     Reminders,
+    // Phase 2 additions
+    Chrome,
+    ScreenTime,
+    Shell,
+    Locations,
 }
 
 impl Source {
@@ -47,12 +52,16 @@ impl Source {
             // Frequent:
             Calendar        => StdDuration::from_secs(15 * 60),
             MailEnrich      => StdDuration::from_secs(15 * 60),
+            ScreenTime      => StdDuration::from_secs(30 * 60),
             // Periodic:
             Contacts        => StdDuration::from_secs(60 * 60),
             Photos          => StdDuration::from_secs(60 * 60),
             Safari          => StdDuration::from_secs(60 * 60),
+            Chrome          => StdDuration::from_secs(60 * 60),
             CallHistory     => StdDuration::from_secs(60 * 60),
             Files           => StdDuration::from_secs(60 * 60),
+            Shell           => StdDuration::from_secs(60 * 60),
+            Locations       => StdDuration::from_secs(2 * 60 * 60),
             // Slow:
             Music           => StdDuration::from_secs(24 * 60 * 60),
         }
@@ -71,13 +80,18 @@ impl Source {
             Source::MailEnrich      => "mail_enrich",
             Source::NotesEnrich     => "notes_enrich",
             Source::Reminders       => "reminders",
+            Source::Chrome          => "chrome",
+            Source::ScreenTime      => "screen_time",
+            Source::Shell           => "shell",
+            Source::Locations       => "locations",
         }
     }
 
     pub fn all() -> &'static [Source] {
         use Source::*;
         &[Contacts, ImessageEnrich, Calendar, Photos, Safari, CallHistory,
-          Music, Files, MailEnrich, NotesEnrich, Reminders]
+          Music, Files, MailEnrich, NotesEnrich, Reminders,
+          Chrome, ScreenTime, Shell, Locations]
     }
 }
 
@@ -255,5 +269,9 @@ fn dispatch(source: Source, ctx: &ExtractCtx) -> Result<ExtractSummary, extract:
         Source::MailEnrich      => mail_enrich::run(ctx),
         Source::NotesEnrich     => notes_enrich::run(ctx),
         Source::Reminders       => reminders::run(ctx),
+        Source::Chrome          => chrome::run(ctx),
+        Source::ScreenTime      => screen_time::run(ctx),
+        Source::Shell           => shell::run(ctx),
+        Source::Locations       => locations::run(ctx),
     }
 }

@@ -253,6 +253,47 @@ pub struct WebSignal {
     /// Best-guess category — research, social, work, news, shopping,
     /// reference, entertainment.
     pub category: Option<String>,
+    /// Which browser the visits came from. Lets the agent reason
+    /// across browsers without merging conflicting signals at this
+    /// layer. "safari" | "chrome" | "arc" | "merged".
+    #[serde(default)]
+    pub browser: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Behavioral / attention signal — Phase 2 additions for the
+// chief-of-staff agent. Aggregated; raw events never leave the graph.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppUsage {
+    pub id: String,
+    pub bundle_id: String,
+    pub display_name: Option<String>,
+    /// Total foreground minutes over the trailing 30 / 180 day windows
+    pub minutes_30d: u64,
+    pub minutes_180d: u64,
+    pub last_used: Option<DateTime<Utc>>,
+    /// "social", "work", "entertainment", "productivity",
+    /// "communication", "reference", "developer", "other"
+    pub category: Option<String>,
+    /// Minute distribution across hour-of-day (UTC, 0..24) and
+    /// day-of-week (Monday=0). Short fixed arrays so JSONL stays small.
+    pub by_hour: [u64; 24],
+    pub by_dow: [u64; 7],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellCommand {
+    pub id: String,
+    /// Root command — "git", "npm", "claude", "cd". Arguments are
+    /// dropped; we never store the full command line.
+    pub command_root: String,
+    pub count_30d: u64,
+    pub count_180d: u64,
+    pub last_used: Option<DateTime<Utc>>,
+    /// "vcs" | "package" | "shell" | "editor" | "network" | "build" | "other"
+    pub category: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +329,8 @@ pub enum EntityKind {
     FileSignal,
     CodeRepo,
     WebSignal,
+    AppUsage,
+    ShellCommand,
     Edge,
 }
 
@@ -305,6 +348,8 @@ impl EntityKind {
             EntityKind::FileSignal => "files.jsonl",
             EntityKind::CodeRepo => "repos.jsonl",
             EntityKind::WebSignal => "web.jsonl",
+            EntityKind::AppUsage => "app_usage.jsonl",
+            EntityKind::ShellCommand => "shell.jsonl",
             EntityKind::Edge => "edges.jsonl",
         }
     }

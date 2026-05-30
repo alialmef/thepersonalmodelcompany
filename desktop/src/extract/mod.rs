@@ -17,6 +17,11 @@ pub mod files;
 pub mod mail_enrich;
 pub mod notes_enrich;
 pub mod reminders;
+// Phase 2 — deeper ingest for the chief-of-staff agent
+pub mod chrome;
+pub mod screen_time;
+pub mod shell;
+pub mod locations;
 
 use crate::graph::{GraphStore, Watermarks};
 use std::sync::Arc;
