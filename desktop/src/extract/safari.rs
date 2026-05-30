@@ -110,6 +110,7 @@ pub fn run(ctx: &ExtractCtx) -> Result<ExtractSummary, ExtractError> {
             visits_180d: agg.visits_180d,
             last_visit: agg.last,
             category: Some(categorize_domain(&domain)),
+            browser: Some("safari".into()),
         });
     }
 
