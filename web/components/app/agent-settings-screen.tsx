@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { BrandMark } from "@/components/shared/brand-mark";
 import {
@@ -28,10 +30,16 @@ import {
 type View = "loading" | "summary" | "editing";
 
 export default function AgentSettingsScreen() {
+  const router = useRouter();
   const [view, setView] = useState<View>("loading");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [config, setConfigState] = useState<AgentConfig | null>(null);
   const [error, setError] = useState<string | undefined>();
+  // True when the user arrived here without a configured agent — i.e.
+  // this is the onboarding step, not a settings visit. We track it on
+  // first load so Save can route them straight into /reading instead
+  // of dumping them back at /right-now.
+  const [isOnboarding, setIsOnboarding] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -39,6 +47,7 @@ export default function AgentSettingsScreen() {
         const [provs, cfg] = await Promise.all([listProviders(), getConfig()]);
         setProviders(provs);
         setConfigState(cfg);
+        setIsOnboarding(!cfg.configured);
         setView(cfg.configured ? "summary" : "editing");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn't load settings.");
@@ -61,7 +70,14 @@ export default function AgentSettingsScreen() {
     try {
       await setConfig(args);
       await refresh();
-      setView("summary");
+      // Onboarding path: straight into the reading flow once an agent
+      // is configured. Settings visit (already had a config): land on
+      // the summary view.
+      if (isOnboarding) {
+        router.push("/reading");
+      } else {
+        setView("summary");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save.");
     }
@@ -105,6 +121,15 @@ export default function AgentSettingsScreen() {
               error={error}
             />
           )}
+        </div>
+
+        <div className="mt-auto pt-16">
+          <Link
+            href={isOnboarding ? "/reading" : "/right-now"}
+            className="text-sm text-foreground/55 hover:text-foreground/85"
+          >
+            Done
+          </Link>
         </div>
       </div>
     </main>

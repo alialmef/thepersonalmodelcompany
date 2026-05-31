@@ -56,6 +56,7 @@ def create_app(
             Form,
             HTTPException,
             Query,
+            Request,
             UploadFile,
         )
         from fastapi.responses import FileResponse, StreamingResponse
@@ -1338,7 +1339,122 @@ def create_app(
                 },
             )
 
+        # ----- Synthesis (agent-driven validation + reasoning) -----
+        #
+        # /confirm calls /synthesis/claims — backend asks the user's
+        # configured frontier provider to produce 5-10 short factual
+        # claims about the user with evidence, using the prompts
+        # module's GENERATE_CLAIMS overlay. The Rust extractors
+        # produced the graph; the user's agent produces the validation
+        # questions over it.
+
+        @app.post("/v1/users/{user_id}/synthesis/claims")
+        @app.get("/v1/users/{user_id}/synthesis/claims")
+        async def synthesis_claims(
+            user_id: str,
+            request: Request,
+            auth: Any = Depends(optional_session),
+        ) -> dict[str, Any]:
+            """Returns {"claims": [...]} for the /confirm screen.
+            V1: stub when the agent isn't configured / no graph data yet
+            — surfaces a friendly placeholder so the flow stays unbroken.
+            """
+            from pmc.agent import crypto
+            from pmc.agent.prompts import TaskKind, compose
+            from pmc.agent.providers.base import (
+                Message as AgentMessage,
+                ProviderConfig as AgentProviderConfig,
+                ProviderError as AgentProviderError,
+            )
+            from pmc.agent.providers.registry import get_provider
+
+            store = getattr(app.state, "auth_store", None)
+            cfg = store.get_provider_config(auth.account.id) if (store and auth) else None
+            if not cfg or not crypto.is_configured():
+                return _stub_claims("Agent not configured yet.")
+
+            try:
+                api_key = crypto.decrypt(cfg["api_key_ciphertext"])
+            except Exception:
+                return _stub_claims("Couldn't unlock your stored key.")
+
+            provider = get_provider(cfg["provider"])
+            if provider is None:
+                return _stub_claims("Provider isn't recognized.")
+
+            # Build a tiny context: per-source counts so the agent has
+            # *something* to ground its claims in, even before Phase 3
+            # makes the real graph queryable. Phase 4 replaces this with
+            # actual graph entities.
+            try:
+                sources = user_store.list_sources(user_id)
+                counts = [
+                    {"kind": (sid.split("-", 1)[0] if "-" in sid else sid),
+                     "items": user_store.count_raw_items(user_id, sid)}
+                    for sid in sources
+                ]
+            except Exception:
+                counts = []
+            if not counts:
+                return _stub_claims("Nothing ingested yet — give it a minute.")
+
+            system_prompt = compose(auth.account.email, TaskKind.GENERATE_CLAIMS)
+            user_msg = (
+                "Here is what has been structured so far (per-source item "
+                "counts). The deeper graph isn't ready yet — generate the "
+                "best concrete claims you can about this person from the "
+                "shape of what's been ingested.\n\n"
+                + json.dumps(counts, indent=2)
+            )
+            try:
+                resp = await provider.chat(
+                    [AgentMessage(role="user", content=user_msg)],
+                    config=AgentProviderConfig(
+                        provider=cfg["provider"],
+                        model=cfg["model"],
+                        api_key=api_key,
+                    ),
+                    max_tokens=1500,
+                    system=system_prompt,
+                )
+            except AgentProviderError as e:
+                return _stub_claims(f"Agent error: {e}")
+
+            text = resp.text.strip()
+            if text.startswith("```"):
+                # Strip markdown fences if the model added them despite
+                # the prompt asking it not to.
+                text = text.strip("`")
+                if text.lower().startswith("json"):
+                    text = text[4:].lstrip()
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                return _stub_claims("Agent didn't return valid JSON.")
+            claims = parsed.get("claims") if isinstance(parsed, dict) else None
+            if not isinstance(claims, list):
+                return _stub_claims("Agent didn't return any claims.")
+            return {"claims": claims}
+
     return app
+
+
+def _stub_claims(reason: str) -> dict[str, Any]:
+    """Polite placeholder when /synthesis/claims can't reach a real agent
+    response yet. The /confirm screen renders these the same way as
+    real claims so the user can still click through and reach
+    /right-now without a dead-end."""
+    return {
+        "claims": [
+            {
+                "claim": reason,
+                "kind": "system",
+                "evidence": [
+                    {"source": "system", "summary": "Agent isn't producing claims yet."}
+                ],
+            }
+        ]
+    }
 
 
 def _build_source(

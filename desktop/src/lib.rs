@@ -575,6 +575,113 @@ fn graph_sample(
     Ok(values.into_iter().take(limit.max(1)).collect())
 }
 
+/// Snapshot of the user's graph as nodes + edges, for the /reading
+/// web-of-memory visualization. Returns only the lightweight fields the
+/// renderer needs (id, kind, optional weight) — no content, no labels.
+/// The frontend lays nodes out with a force simulation; new nodes
+/// fade in as they appear across polls.
+#[derive(serde::Serialize)]
+struct GraphNode {
+    id: String,
+    kind: String,
+    /// Optional 0..1 importance hint — used to scale node radius. The
+    /// renderer ignores it if missing.
+    weight: Option<f32>,
+}
+
+#[derive(serde::Serialize)]
+struct GraphEdge {
+    /// Stable id so the renderer can keep a per-edge React key.
+    id: String,
+    source: String,
+    target: String,
+    kind: String,
+}
+
+#[derive(serde::Serialize)]
+struct GraphSnapshot {
+    nodes: Vec<GraphNode>,
+    edges: Vec<GraphEdge>,
+}
+
+#[tauri::command]
+fn graph_snapshot(user_id: String) -> Result<GraphSnapshot, String> {
+    let store = open_store(&user_id)?;
+    let mut nodes: Vec<GraphNode> = Vec::new();
+
+    // Helper: load a kind, extract id field if present, push as a node.
+    fn push_kind(
+        store: &graph::GraphStore,
+        kind: graph::EntityKind,
+        label: &str,
+        out: &mut Vec<GraphNode>,
+    ) {
+        if let Ok(values) = store.load::<serde_json::Value>(kind) {
+            for v in values {
+                let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                if id.is_empty() {
+                    continue;
+                }
+                let weight = v
+                    .get("visit_count")
+                    .or_else(|| v.get("visits_180d"))
+                    .or_else(|| v.get("play_count"))
+                    .or_else(|| v.get("minutes_180d"))
+                    .or_else(|| v.get("count_180d"))
+                    .and_then(|x| x.as_f64())
+                    .map(|x| (x.ln_1p() / 12.0).clamp(0.0, 1.0) as f32);
+                out.push(GraphNode {
+                    id: id.to_string(),
+                    kind: label.to_string(),
+                    weight,
+                });
+            }
+        }
+    }
+
+    push_kind(&store, graph::EntityKind::Person,             "person",       &mut nodes);
+    push_kind(&store, graph::EntityKind::Place,              "place",        &mut nodes);
+    push_kind(&store, graph::EntityKind::Event,              "event",        &mut nodes);
+    push_kind(&store, graph::EntityKind::Episode,            "episode",      &mut nodes);
+    push_kind(&store, graph::EntityKind::Project,            "project",      &mut nodes);
+    push_kind(&store, graph::EntityKind::Theme,              "theme",        &mut nodes);
+    push_kind(&store, graph::EntityKind::OpenLoop,           "open_loop",    &mut nodes);
+    push_kind(&store, graph::EntityKind::TasteItem,          "taste",        &mut nodes);
+    push_kind(&store, graph::EntityKind::FileSignal,         "file",         &mut nodes);
+    push_kind(&store, graph::EntityKind::CodeRepo,           "repo",         &mut nodes);
+    push_kind(&store, graph::EntityKind::WebSignal,          "web",          &mut nodes);
+    push_kind(&store, graph::EntityKind::AppUsage,           "app",          &mut nodes);
+    push_kind(&store, graph::EntityKind::ShellCommand,       "shell",        &mut nodes);
+    push_kind(&store, graph::EntityKind::NotificationSignal, "notification", &mut nodes);
+
+    // Edges: only emit those whose endpoints are present in the node set.
+    let known_ids: std::collections::HashSet<&str> =
+        nodes.iter().map(|n| n.id.as_str()).collect();
+    let mut edges: Vec<GraphEdge> = Vec::new();
+    if let Ok(values) = store.load::<serde_json::Value>(graph::EntityKind::Edge) {
+        for v in values {
+            let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
+            let from = v.get("from_id").and_then(|x| x.as_str()).unwrap_or("");
+            let to = v.get("to_id").and_then(|x| x.as_str()).unwrap_or("");
+            let kind = v.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+            if id.is_empty() || from.is_empty() || to.is_empty() {
+                continue;
+            }
+            if !known_ids.contains(from) || !known_ids.contains(to) {
+                continue;
+            }
+            edges.push(GraphEdge {
+                id: id.to_string(),
+                source: from.to_string(),
+                target: to.to_string(),
+                kind: kind.to_string(),
+            });
+        }
+    }
+
+    Ok(GraphSnapshot { nodes, edges })
+}
+
 /// Start the always-on background scheduler for this user. Safe to
 /// call multiple times — second-and-later calls are a no-op.
 #[tauri::command]
@@ -621,6 +728,7 @@ pub fn run() {
             graph_kickoff,
             graph_counts,
             graph_sample,
+            graph_snapshot,
             graph_start_scheduler,
             reset_user,
         ])
