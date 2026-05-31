@@ -68,7 +68,7 @@ export default function FirstLaunchScreen({ onBegin }: { onBegin?: () => void })
         style={{ fontSize: 'clamp(18px, 2vw, 26px)' }}
       >
         <LetterCascade
-          text="Let's start with your writing."
+          text="I read everything on this Mac so I can be useful."
           startMs={5500}
           perLetterMs={35}
         />

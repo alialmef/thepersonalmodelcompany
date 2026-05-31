@@ -23,6 +23,7 @@ needs to resolve UploadFile/Form types at route-registration time, and the
 closure-scoped lazy import doesn't survive deferred annotation evaluation.
 """
 
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -291,6 +292,7 @@ def create_app(
         from pmc.storage.audit import AuditLog
         from pmc.storage.deletion import DeletionManager
         from pmc.storage.founders import FounderTracker
+        from pmc.storage.redactions import RedactionsStore
         from pmc.storage.user_store import UserStore
         from pmc.storage.verification_store import VerificationStore
         from pmc.world import WorldStore
@@ -301,6 +303,7 @@ def create_app(
         action_store = ActionStore(storage_root)
         world_store = WorldStore(storage_root)
         audit_log = AuditLog(storage_root)
+        redactions_store = RedactionsStore(storage_root)
         deletion = DeletionManager(user_store, artifact_store, audit_log)
         action_service = ActionService(
             verification_store,
@@ -1195,6 +1198,145 @@ def create_app(
                 "active_cleared": cleared,
                 "retrain_needed": cleared,
             }
+
+        # ----- Knowledge update (pause / private / search-and-forget) -----
+        #
+        # Backing surface for the /knowledge-update screen in the Mac app.
+        # Auto-opt-in means we ingest everything by default; this is the
+        # contract on the other side: queryable, redactable, pauseable.
+
+        @app.get("/v1/users/{user_id}/knowledge/overview")
+        def knowledge_overview(user_id: str) -> dict[str, Any]:
+            """Combined snapshot for the Manage screen: every source with
+            its current item count + paused state, plus the list of
+            active redactions."""
+            sources = user_store.list_sources(user_id)
+            paused_set = set(redactions_store.paused_source_ids(user_id))
+            source_rows = []
+            for sid in sources:
+                kind = sid.split("-", 1)[0] if "-" in sid else sid
+                try:
+                    item_count = user_store.count_raw_items(user_id, sid)
+                except Exception:
+                    item_count = 0
+                source_rows.append({
+                    "source_id": sid,
+                    "kind": kind,
+                    "item_count": item_count,
+                    "paused": sid in paused_set,
+                })
+            state = redactions_store.state(user_id)
+            return {
+                "sources": source_rows,
+                "redactions": [r.model_dump(mode="json") for r in state.redactions],
+                "paused_sources": [s.model_dump(mode="json") for s in state.paused_sources],
+            }
+
+        @app.post("/v1/users/{user_id}/knowledge/sources/{source_id}/pause")
+        def pause_source(user_id: str, source_id: str) -> dict[str, Any]:
+            redactions_store.pause_source(user_id, source_id)
+            audit_log.log(
+                user_id, stage="redact", event="source_paused",
+                data={"source_id": source_id},
+            )
+            return {"ok": True, "source_id": source_id, "paused": True}
+
+        @app.post("/v1/users/{user_id}/knowledge/sources/{source_id}/resume")
+        def resume_source(user_id: str, source_id: str) -> dict[str, Any]:
+            redactions_store.resume_source(user_id, source_id)
+            audit_log.log(
+                user_id, stage="redact", event="source_resumed",
+                data={"source_id": source_id},
+            )
+            return {"ok": True, "source_id": source_id, "paused": False}
+
+        @app.post("/v1/users/{user_id}/knowledge/redactions")
+        def add_redaction(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            kind = (body.get("kind") or "").strip()
+            value = (body.get("value") or "").strip()
+            note = body.get("note")
+            if kind not in ("person", "topic", "date_range"):
+                raise HTTPException(
+                    status_code=400, detail="kind must be person|topic|date_range",
+                )
+            if not value:
+                raise HTTPException(status_code=400, detail="value required")
+            try:
+                r = redactions_store.add_redaction(
+                    user_id, kind=kind, value=value, note=note,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
+            audit_log.log(
+                user_id, stage="redact", event="redaction_added",
+                data={"id": r.id, "kind": kind, "value_len": len(value)},
+            )
+            return r.model_dump(mode="json")
+
+        @app.delete("/v1/users/{user_id}/knowledge/redactions/{redaction_id}")
+        def remove_redaction(user_id: str, redaction_id: str) -> dict[str, Any]:
+            ok = redactions_store.remove_redaction(user_id, redaction_id)
+            if not ok:
+                raise HTTPException(status_code=404, detail="redaction not found")
+            audit_log.log(
+                user_id, stage="redact", event="redaction_removed",
+                data={"id": redaction_id},
+            )
+            return {"ok": True, "removed": redaction_id}
+
+        @app.get("/v1/users/{user_id}/knowledge/search")
+        def knowledge_search(
+            user_id: str,
+            q: str = "",
+            limit: int = 50,
+        ) -> dict[str, Any]:
+            """V1 search: case-insensitive substring scan over raw items.
+            Slow for users with deep ingest, but honest and useful as the
+            redact UX. Phase 3 (the PKG) replaces this with hybrid
+            vector + BM25 + graph traversal."""
+            q_low = q.strip().lower()
+            if not q_low:
+                return {"query": q, "results": [], "truncated": False}
+            results: list[dict[str, Any]] = []
+            truncated = False
+            try:
+                for item in user_store.load_raw_items(user_id):
+                    blob = (
+                        item.model_dump_json() if hasattr(item, "model_dump_json")
+                        else json.dumps(item, default=str)
+                    )
+                    if q_low in blob.lower():
+                        results.append({
+                            "id": getattr(item, "id", None),
+                            "source_id": getattr(item, "source_id", None),
+                            "kind": getattr(item, "kind", None),
+                            "preview": blob[:280],
+                            "timestamp": str(getattr(item, "timestamp", "")) or None,
+                        })
+                        if len(results) >= limit:
+                            truncated = True
+                            break
+            except Exception:
+                pass
+            return {"query": q, "results": results, "truncated": truncated}
+
+        @app.delete("/v1/users/{user_id}/knowledge/items/{item_id}")
+        def forget_item(user_id: str, item_id: str) -> dict[str, Any]:
+            """V1: not yet implemented — UserStore needs per-item delete.
+            For now, returns 501 with a clear hint so the UI can disable
+            the per-result Forget button until Phase 3 lands the PKG
+            (which makes per-item delete trivial)."""
+            raise HTTPException(
+                status_code=501,
+                detail={
+                    "error": "not_implemented",
+                    "message": (
+                        "Per-item forget lands with Phase 3 (PKG). "
+                        "Today: pause the source it came from, or mark "
+                        "a Person/Topic private, or wipe and start over."
+                    ),
+                },
+            )
 
     return app
 
