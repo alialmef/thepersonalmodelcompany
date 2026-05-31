@@ -293,6 +293,7 @@ def create_app(
         from pmc.storage.audit import AuditLog
         from pmc.storage.deletion import DeletionManager
         from pmc.storage.founders import FounderTracker
+        from pmc.storage.graph_store import GraphStore as PmcGraphStore
         from pmc.storage.redactions import RedactionsStore
         from pmc.storage.user_store import UserStore
         from pmc.storage.verification_store import VerificationStore
@@ -305,6 +306,12 @@ def create_app(
         world_store = WorldStore(storage_root)
         audit_log = AuditLog(storage_root)
         redactions_store = RedactionsStore(storage_root)
+        # GraphStore reads the typed-entity JSONL files the Rust
+        # extractors wrote. When storage_root matches ~/.pmc-dev/storage
+        # the backend reads exactly what Tauri wrote — no network hop.
+        # In prod the Mac app will push entities over HTTP; the layout
+        # stays identical.
+        graph_store = PmcGraphStore(storage_root)
         deletion = DeletionManager(user_store, artifact_store, audit_log)
         action_service = ActionService(
             verification_store,
@@ -320,6 +327,7 @@ def create_app(
             audit_log,
             deletion=deletion,
             registry=server.registry,
+            graph_store=graph_store,
         )
         pipeline = PMCPipeline(
             user_store=user_store,
@@ -1339,6 +1347,28 @@ def create_app(
                 },
             )
 
+        # ----- Graph snapshot (for the browser memory web) -----
+        #
+        # The Tauri webview reads the graph from the local Rust store
+        # via `graph_snapshot` (faster, in-process). The browser can't
+        # invoke Tauri commands, so it goes through this endpoint —
+        # same shape, same data.
+
+        @app.get("/v1/users/{user_id}/graph/snapshot")
+        def graph_snapshot(user_id: str) -> dict[str, Any]:
+            if not graph_store.exists(user_id):
+                return {"nodes": [], "edges": []}
+            return graph_store.snapshot(user_id)
+
+        @app.get("/v1/users/{user_id}/graph/counts")
+        def graph_counts(user_id: str) -> dict[str, Any]:
+            if not graph_store.exists(user_id):
+                return {"counts": {}, "total": 0}
+            from pmc.storage.graph_store import NODE_KINDS
+            counts = graph_store.counts(user_id)
+            total = sum(counts.get(k, 0) for k in NODE_KINDS)
+            return {"counts": counts, "total": total}
+
         # ----- Synthesis (agent-driven validation + reasoning) -----
         #
         # /confirm calls /synthesis/claims — backend asks the user's
@@ -1382,30 +1412,49 @@ def create_app(
             if provider is None:
                 return _stub_claims("Provider isn't recognized.")
 
-            # Build a tiny context: per-source counts so the agent has
-            # *something* to ground its claims in, even before Phase 3
-            # makes the real graph queryable. Phase 4 replaces this with
-            # actual graph entities.
-            try:
-                sources = user_store.list_sources(user_id)
-                counts = [
-                    {"kind": (sid.split("-", 1)[0] if "-" in sid else sid),
-                     "items": user_store.count_raw_items(user_id, sid)}
-                    for sid in sources
-                ]
-            except Exception:
-                counts = []
-            if not counts:
-                return _stub_claims("Nothing ingested yet — give it a minute.")
+            # Build the agent context from the actual structured graph
+            # (people, places, themes, projects, apps, open loops) — not
+            # just per-source counts. This is the load-bearing change:
+            # claims become specific because the agent now sees real
+            # entities, not bag-of-source-totals.
+            from pmc.storage.graph_store import summarize_for_agent
+            if graph_store.exists(user_id) and graph_store.total_node_count(user_id) > 0:
+                graph_summary = summarize_for_agent(
+                    graph_store, user_id, per_kind_limit=10,
+                )
+                user_msg = (
+                    "Here is the user's structured personal knowledge graph "
+                    "so far. Counts per entity kind + a representative "
+                    "sample of each. Use this to generate concrete claims "
+                    "about the user — name real people, real places, real "
+                    "patterns. Cite the entity kind + a salient field as "
+                    "evidence.\n\n"
+                    + json.dumps(graph_summary, indent=2, default=str)
+                )
+            else:
+                # Fall back to source counts if the graph is empty (no
+                # extractor has produced typed entities yet, but raw
+                # items may have been uploaded).
+                try:
+                    sources = user_store.list_sources(user_id)
+                    counts = [
+                        {"kind": (sid.split("-", 1)[0] if "-" in sid else sid),
+                         "items": user_store.count_raw_items(user_id, sid)}
+                        for sid in sources
+                    ]
+                except Exception:
+                    counts = []
+                if not counts:
+                    return _stub_claims("Nothing ingested yet — give it a minute.")
+                user_msg = (
+                    "The structured graph isn't ready yet — generate the "
+                    "best concrete claims you can about this person from "
+                    "the shape of what's been ingested (per-source "
+                    "counts).\n\n"
+                    + json.dumps(counts, indent=2)
+                )
 
             system_prompt = compose(auth.account.email, TaskKind.GENERATE_CLAIMS)
-            user_msg = (
-                "Here is what has been structured so far (per-source item "
-                "counts). The deeper graph isn't ready yet — generate the "
-                "best concrete claims you can about this person from the "
-                "shape of what's been ingested.\n\n"
-                + json.dumps(counts, indent=2)
-            )
             try:
                 resp = await provider.chat(
                     [AgentMessage(role="user", content=user_msg)],

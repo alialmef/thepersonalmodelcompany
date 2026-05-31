@@ -15,6 +15,7 @@ from pmc.serve.registry import AdapterRegistry
 from pmc.storage.artifact_store import ArtifactStore
 from pmc.storage.audit import AuditEvent, AuditLog
 from pmc.storage.deletion import DeletionManager
+from pmc.storage.graph_store import GraphStore, NODE_KINDS
 from pmc.storage.user_store import UserStore
 
 
@@ -34,6 +35,12 @@ class UserStatus(BaseModel):
     # Per-source item counts so the UI can render a live scoreboard
     # ("Messages 12,431 · Notes 47"). Each entry is {source_id, kind, item_count}.
     raw_source_breakdown: list[dict] = Field(default_factory=list)
+    # Graph entity counts produced by the Rust extractors. Read from the
+    # Tauri-local graph store (which the backend can also reach when the
+    # storage_root is shared, e.g. local dev pointing at
+    # ~/.pmc-dev/storage). Keys are entity kinds: person, place, theme, etc.
+    graph_entity_counts: dict[str, int] = Field(default_factory=dict)
+    graph_node_total: int = 0
     dataset_versions: list[str] = Field(default_factory=list)
     registered_for_serving: bool = False
     recent_events: list[AuditEvent] = Field(default_factory=list)
@@ -58,12 +65,17 @@ class Monitor:
         *,
         deletion: DeletionManager | None = None,
         registry: AdapterRegistry | None = None,
+        graph_store: GraphStore | None = None,
     ) -> None:
         self.user_store = user_store
         self.artifact_store = artifact_store
         self.audit_log = audit_log
         self.deletion = deletion
         self.registry = registry
+        # Optional: when the backend shares its storage_root with the
+        # Tauri-local graph path, this Monitor surfaces graph counts in
+        # /status so the UI tells the truth about what's been structured.
+        self.graph_store = graph_store
 
     def user_status(self, user_id: str, *, recent_events: int = 10) -> UserStatus:
         status = UserStatus(user_id=user_id)
@@ -106,6 +118,13 @@ class Monitor:
 
         if self.registry is not None:
             status.registered_for_serving = user_id in self.registry
+
+        # Graph counts (the load-bearing add — what the Rust extractors
+        # actually produced, surfaced to the UI/agent for the first time).
+        if self.graph_store is not None and self.graph_store.exists(user_id):
+            counts = self.graph_store.counts(user_id)
+            status.graph_entity_counts = counts
+            status.graph_node_total = sum(counts.get(k, 0) for k in NODE_KINDS)
 
         status.recent_events = self.audit_log.latest(user_id, n=recent_events)
         return status

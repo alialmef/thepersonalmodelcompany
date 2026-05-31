@@ -3,14 +3,22 @@
 import { isTauri } from "@/lib/runtime";
 
 /**
- * Client for the Tauri-side graph_snapshot command. Returns the user's
- * personal knowledge graph as nodes + edges — the data the /reading
- * web-of-memory visualization renders.
+ * Client for the graph snapshot. Two paths:
+ *   - Tauri webview: the Rust graph_snapshot command (in-process, fast)
+ *   - Browser: GET /v1/users/{id}/graph/snapshot on the backend (which
+ *     reads the same JSONL files when storage_root is shared with the
+ *     Tauri-local path; in prod, after Mac-app push, it reads what got
+ *     uploaded)
  *
- * No content fields are returned (no names, no message text). Just
- * stable ids + entity-kind labels. The visualization is intentionally
- * shape-only.
+ * Returns the user's personal knowledge graph as nodes + edges — what
+ * the /reading web-of-memory visualization renders. No content fields
+ * (no names, no message text). Just stable ids + entity-kind labels.
  */
+
+const PMC_API_URL =
+  process.env.NEXT_PUBLIC_PMC_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8000";
 
 export interface GraphNode {
   id: string;
@@ -33,10 +41,24 @@ export interface GraphSnapshot {
 const EMPTY: GraphSnapshot = { nodes: [], edges: [] };
 
 export async function graphSnapshot(userId: string): Promise<GraphSnapshot> {
-  if (!isTauri()) return EMPTY;
+  if (!userId) return EMPTY;
+  // Prefer the Tauri path when available — no network hop, also works
+  // offline. Fall back to the backend endpoint for browser dev.
+  if (isTauri()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return (await invoke("graph_snapshot", { userId })) as GraphSnapshot;
+    } catch {
+      /* fall through to backend */
+    }
+  }
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return (await invoke("graph_snapshot", { userId })) as GraphSnapshot;
+    const r = await fetch(
+      `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/graph/snapshot`,
+      { cache: "no-store" },
+    );
+    if (!r.ok) return EMPTY;
+    return (await r.json()) as GraphSnapshot;
   } catch {
     return EMPTY;
   }
