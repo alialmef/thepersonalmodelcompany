@@ -88,7 +88,10 @@ function TauriSignIn() {
       // Bind any pre-existing anonymous pmcUserId to this account so
       // accumulated data (raw ingest, recall.db, etc.) survives.
       await claimAnonymousIfAny(result.session_token);
-      router.push("/reading");
+      // Onboarding order: sign-in → pick agent → /reading. The agent
+      // is needed for synthesis the moment /reading starts, so the
+      // user has to configure it before we can do anything useful.
+      router.push("/settings/agent");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Couldn't sign in.";
       const friendlier = msg.includes("expired") || msg.includes("match")

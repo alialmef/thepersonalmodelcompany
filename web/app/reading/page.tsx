@@ -4,8 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { BrandMark } from "@/components/shared/brand-mark";
+import MemoryWeb from "@/components/app/memory-web";
 import { useUser } from "@/hooks/use-user";
-import { isTauri } from "@/lib/runtime";
+import { getConfig as getAgentConfig } from "@/lib/api/agent";
+import {
+  imessageStatus,
+  isTauri,
+  openFullDiskAccessSettings,
+} from "@/lib/runtime";
 
 const PMC_API_URL =
   process.env.NEXT_PUBLIC_PMC_API_URL ??
@@ -15,17 +21,26 @@ const PMC_API_URL =
 /**
  * /reading — the moment.
  *
- * Lands here right after sign-in. Auto-fires graph_kickoff (which
- * triggers the macOS Full Disk Access prompt the first time any
- * extractor reaches for a permission-gated source). Polls
- * /v1/users/{id}/status and surfaces the typed prose of what's being
- * read in real time. Auto-advances to /right-now once ingest is
- * "steady enough" — totals haven't moved for ~5 polls plus a minimum
- * dwell so the page doesn't whip past before the user sees it.
+ * On mount, this page does three things in order:
  *
- * Auto-opt-in: no source picker, no Connect buttons. One OS prompt,
- * everything starts reading. The redact + manage surface is at
- * /knowledge-update, after the fact.
+ *   1. Probes iMessage's chat.db via the imessage_status Tauri
+ *      command. This is what *actively triggers* the macOS Full Disk
+ *      Access TCC dialog — the OS only prompts when an entitled
+ *      binary actually attempts to read a gated path. Without this
+ *      explicit poke, the background scheduler would just silently
+ *      hit PermissionDenied per source and write nothing, leaving
+ *      the user staring at zero counts forever.
+ *
+ *   2. If FDA was granted (chat.db is readable), fires graph_kickoff
+ *      which schedules every extractor in the background.
+ *
+ *   3. If FDA was denied or never asked, surfaces a clear "Grant
+ *      Full Disk Access" affordance that deep-links into the right
+ *      System Settings panel.
+ *
+ * Polls /v1/users/{id}/status every 3s and surfaces typed-prose
+ * per-source counts as they come in. Auto-advances to /right-now
+ * when totals are steady for ~5 polls + a minimum dwell.
  */
 
 interface SourceBreakdown {
@@ -39,6 +54,13 @@ interface UserStatus {
   raw_source_breakdown?: SourceBreakdown[];
 }
 
+type FdaState =
+  | "unknown"        // haven't probed yet
+  | "granted"        // probe returned readable
+  | "needs_grant"    // probe returned permission_denied
+  | "not_present"    // no chat.db on this Mac (skip the prompt)
+  | "not_tauri";     // running in a browser, not the Mac app
+
 const POLL_MS = 3_000;
 const STEADY_AFTER_POLLS = 5;
 const MIN_DWELL_MS = 6_000;
@@ -49,26 +71,68 @@ export default function ReadingPage() {
   const [sources, setSources] = useState<SourceBreakdown[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [steady, setSteady] = useState(false);
+  const [fda, setFda] = useState<FdaState>("unknown");
   const lastTotalRef = useRef<number>(-1);
   const steadyCountRef = useRef<number>(0);
   const mountedAt = useRef<number>(Date.now());
 
-  // Auto-fire graph_kickoff once on mount. This is what triggers the
-  // macOS Full Disk Access prompt the first time an extractor reaches
-  // for a permission-gated source — so the user sees it the moment
-  // they land here, exactly once, without us asking them to click a
-  // Connect button first.
+  // Step 0: gate on having an agent configured. The structuring pass
+  // depends on the user's chosen frontier model running entity
+  // resolution + theme detection. No agent → bounce to /settings/agent.
   useEffect(() => {
-    if (!user?.pmcUserId || !isTauri()) return;
+    if (!user?.pmcUserId) return;
     let cancelled = false;
     (async () => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        if (!cancelled) await invoke("graph_kickoff", { userId: user.pmcUserId });
+        const cfg = await getAgentConfig();
+        if (cancelled) return;
+        if (!cfg.configured) {
+          router.replace("/settings/agent");
+        }
       } catch {
-        // graph_kickoff is best-effort; if it fails we still poll
-        // /v1/users/{id}/status — the user may already have data from a
-        // prior session.
+        // If we can't reach the backend, don't bounce — let the user see
+        // the FDA / reading state and figure it out.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.pmcUserId, router]);
+
+  // Step 1: probe FDA + (if granted) fire graph_kickoff. Order matters —
+  // the imessage_status probe is what makes macOS pop the TCC dialog.
+  useEffect(() => {
+    if (!user?.pmcUserId) return;
+    if (!isTauri()) {
+      setFda("not_tauri");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await imessageStatus();
+        if (cancelled) return;
+        if (!status.chat_db_exists) {
+          setFda("not_present");
+        } else if (status.can_read) {
+          setFda("granted");
+        } else {
+          setFda("needs_grant");
+          return; // don't kick off the scheduler — every extractor would PermissionDenied
+        }
+        // FDA OK (or chat.db not present — try the rest anyway). Fire
+        // the scheduler.
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("graph_kickoff", { userId: user.pmcUserId });
+      } catch {
+        // If imessage_status itself errors out (rare), still let the
+        // scheduler try — some extractors don't need FDA at all.
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("graph_kickoff", { userId: user.pmcUserId });
+        } catch {
+          /* nothing more we can do */
+        }
       }
     })();
     return () => {
@@ -76,6 +140,8 @@ export default function ReadingPage() {
     };
   }, [user?.pmcUserId]);
 
+  // Step 2: poll status (per-source breakdown). Runs regardless of FDA
+  // state — if data does start coming in we want to surface it.
   useEffect(() => {
     if (!user?.pmcUserId) return;
     let cancelled = false;
@@ -92,7 +158,6 @@ export default function ReadingPage() {
         setTotal(t);
         setSources(data.raw_source_breakdown ?? []);
 
-        // Steadiness check: same total across N polls + minimum dwell
         if (t === lastTotalRef.current && t > 0) {
           steadyCountRef.current += 1;
         } else {
@@ -118,63 +183,129 @@ export default function ReadingPage() {
     };
   }, [user?.pmcUserId]);
 
-  // Auto-advance once steady — give the user a beat to read the page first.
+  // When the web reports stable (no new nodes for ~6 polls), advance
+  // the user to /confirm — the validation pass before /right-now.
+  const [webStable, setWebStable] = useState(false);
   useEffect(() => {
-    if (!steady) return;
-    const t = setTimeout(() => router.push("/right-now"), 1200);
+    if (!steady && !webStable) return;
+    const t = setTimeout(() => router.push("/confirm"), 1400);
     return () => clearTimeout(t);
-  }, [steady, router]);
+  }, [steady, webStable, router]);
 
-  const sortedSources = [...sources]
-    .sort((a, b) => (b.item_count ?? 0) - (a.item_count ?? 0))
-    .slice(0, 10);
+  // Re-probe after the user comes back from System Settings.
+  async function recheckFda() {
+    if (!user?.pmcUserId || !isTauri()) return;
+    const status = await imessageStatus();
+    if (status.can_read) {
+      setFda("granted");
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("graph_kickoff", { userId: user.pmcUserId });
+    } else {
+      setFda("needs_grant");
+    }
+  }
 
   return (
     <main className="min-h-screen w-full bg-background text-foreground">
-      <div className="mx-auto flex min-h-screen max-w-2xl flex-col px-8 pb-32 pt-16">
-        <div className="mb-20">
+      <div className="mx-auto flex min-h-screen max-w-5xl flex-col px-8 pb-16 pt-16">
+        <div className="mb-12">
           <BrandMark />
         </div>
 
-        <div className="mt-16 space-y-10 text-foreground/85">
-          <div className="space-y-3">
-            <div className="text-xl font-semibold text-foreground">
-              {steady ? "Done." : "Reading."}
-            </div>
-            <div className="text-base text-foreground/55">
-              {total > 0
-                ? `${total.toLocaleString()} items so far.`
-                : "Opening your sources…"}
-            </div>
+        {fda === "needs_grant" ? (
+          <div className="mt-16">
+            <FdaPrompt onGranted={recheckFda} />
           </div>
-
-          {sortedSources.length > 0 && (
-            <div className="space-y-1.5 text-[15px] text-foreground/70">
-              {sortedSources.map((s) => (
-                <div
-                  key={s.source_id}
-                  className="flex items-baseline justify-between gap-4"
-                >
-                  <span className="text-foreground/60">{s.kind}</span>
-                  <span className="font-mono text-foreground/45 text-[13px]">
-                    {s.item_count.toLocaleString()}
-                  </span>
-                </div>
-              ))}
+        ) : (
+          <>
+            {/* The web. Centered, full-bleed within the column. */}
+            <div className="flex-1 flex items-center justify-center">
+              <MemoryWeb
+                userId={user?.pmcUserId ?? ""}
+                className="w-full max-w-3xl aspect-[3/2]"
+                onStable={() => setWebStable(true)}
+              />
             </div>
-          )}
-        </div>
 
-        <div className="mt-auto pt-16">
+            {/* Caption underneath the web. Calm, brief. */}
+            <div className="text-center space-y-1 mt-8">
+              <div className="text-base text-foreground/55">
+                {webStable
+                  ? "Done."
+                  : total > 0
+                  ? "Reading."
+                  : fda === "granted"
+                  ? "Opening your sources…"
+                  : "Starting up…"}
+              </div>
+              {total > 0 && (
+                <div className="text-xs text-foreground/30 font-mono">
+                  {total.toLocaleString()} items
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        <div className="mt-12 flex justify-center">
           <button
             type="button"
-            onClick={() => router.push("/right-now")}
-            className="text-base text-foreground/55 hover:text-foreground/85 transition-colors"
+            onClick={() => router.push("/confirm")}
+            className="text-sm text-foreground/45 hover:text-foreground/75 transition-colors"
           >
             Continue
           </button>
         </div>
       </div>
     </main>
+  );
+}
+
+function FdaPrompt({ onGranted }: { onGranted: () => void | Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="space-y-8">
+      <div className="space-y-3">
+        <div className="text-xl font-semibold text-foreground">
+          One permission first.
+        </div>
+        <div className="text-base text-foreground/55">
+          PMC needs Full Disk Access to read your messages, mail,
+          calendar, Screen Time, and the rest. macOS gates this — you
+          have to flip the switch yourself.
+        </div>
+        <div className="text-sm text-foreground/45">
+          Click below to open the right Settings panel, toggle
+          <span className="font-mono"> Personal Model Company</span> on,
+          come back here, and tap <span className="text-foreground/65">I&apos;ve granted access</span>.
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-8">
+        <button
+          type="button"
+          onClick={async () => {
+            await openFullDiskAccessSettings();
+          }}
+          className="text-base text-foreground/85 hover:text-foreground"
+        >
+          Open Full Disk Access settings
+        </button>
+        <button
+          type="button"
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await onGranted();
+            } finally {
+              setBusy(false);
+            }
+          }}
+          disabled={busy}
+          className="text-base text-foreground/55 hover:text-foreground/85 disabled:cursor-default disabled:text-foreground/25"
+        >
+          {busy ? "Checking…" : "I've granted access"}
+        </button>
+      </div>
+    </div>
   );
 }

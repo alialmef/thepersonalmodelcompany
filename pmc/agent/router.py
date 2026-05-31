@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from pmc.agent import crypto
+from pmc.agent.prompts import TaskKind, compose
 from pmc.agent.providers.base import (
     Message,
     ProviderConfig,

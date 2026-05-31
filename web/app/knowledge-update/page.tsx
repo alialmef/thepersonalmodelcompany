@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { BrandMark } from "@/components/shared/brand-mark";
 import { useUser } from "@/hooks/use-user";
@@ -81,6 +82,15 @@ export default function KnowledgeUpdatePage() {
         <PrivateList overview={overview} userId={userId} onChange={refresh} />
         <SearchAndForget userId={userId} />
         <Erase userId={userId} />
+
+        <div className="mt-auto pt-16">
+          <Link
+            href="/right-now"
+            className="text-sm text-foreground/55 hover:text-foreground/85"
+          >
+            Done
+          </Link>
+        </div>
       </div>
     </main>
   );
