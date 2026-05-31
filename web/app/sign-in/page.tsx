@@ -15,7 +15,9 @@ import {
   requestEmailCode,
   storeSession,
 } from "@/lib/api/auth";
-import { isTauri } from "@/lib/runtime";
+// isTauri import removed: /sign-in now always renders the code-paste
+// flow. WebSignIn (cookie-based magic-link) is preserved in this file
+// as dead reference code but no longer reachable from the entry point.
 
 /**
  * Sign-in. Two renderings, one route:
@@ -241,16 +243,23 @@ function appendQuery(url: string, extra: Record<string, string>): string {
 }
 
 // ---------------------------------------------------------------------------
-// Entry — branch on runtime
+// Entry
 // ---------------------------------------------------------------------------
+//
+// One sign-in flow: code-paste against the FastAPI backend, talking to
+// /v1/auth/{email,exchange}. Used both inside the Tauri webview and
+// when developers test in a browser pointed at the same backend.
+//
+// The old WebSignIn (cookie-based magic-link via Next.js /api/auth/*)
+// is kept in this file for reference but is no longer rendered. With
+// the BYOM + auto-opt-in pivot, all auth is in-app — the marketing
+// site doesn't need its own sign-in surface.
 
 function SignInInner() {
-  // isTauri() depends on window; render a stable placeholder on the
-  // first paint to avoid hydration mismatch.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return <main className="min-h-screen w-full bg-background" />;
-  return isTauri() ? <TauriSignIn /> : <WebSignIn />;
+  return <TauriSignIn />;
 }
 
 export default function SignInPage() {
