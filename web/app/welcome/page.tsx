@@ -86,14 +86,16 @@ export default function WelcomePage() {
   };
 
   // Where Begin goes:
-  //   - if the user is already signed in OR has a session token,
-  //     skip /sign-in and go straight to /connect
-  //   - otherwise route to /sign-in first
+  //   - if the user already has a session token, skip /sign-in and
+  //     go straight to /reading (which auto-fires graph_kickoff so
+  //     the macOS FDA prompt pops on its own)
+  //   - otherwise route to /sign-in first; /sign-in lands the user on
+  //     /reading after the code exchange
   const beginTarget = (() => {
     try {
       if (typeof window === "undefined") return "/sign-in";
       const token = window.localStorage.getItem("pmc.sessionToken");
-      return token ? "/connect" : "/sign-in";
+      return token ? "/reading" : "/sign-in";
     } catch {
       return "/sign-in";
     }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { BrandMark } from "@/components/shared/brand-mark";
 import { useUser } from "@/hooks/use-user";
+import { isTauri } from "@/lib/runtime";
 
 const PMC_API_URL =
   process.env.NEXT_PUBLIC_PMC_API_URL ??
@@ -12,17 +13,19 @@ const PMC_API_URL =
   "http://localhost:8000";
 
 /**
- * /reading — Phase 1.1 ingest progress.
+ * /reading — the moment.
  *
- * After /connect kicks off graph extraction, this page polls
- * /v1/users/{id}/status and renders typed-prose lines describing
- * what's being read. Progresses to /right-now when ingest is
- * "steady enough" — i.e. the total raw item count hasn't moved for
- * a few polls. The user can also tap Continue at any time.
+ * Lands here right after sign-in. Auto-fires graph_kickoff (which
+ * triggers the macOS Full Disk Access prompt the first time any
+ * extractor reaches for a permission-gated source). Polls
+ * /v1/users/{id}/status and surfaces the typed prose of what's being
+ * read in real time. Auto-advances to /right-now once ingest is
+ * "steady enough" — totals haven't moved for ~5 polls plus a minimum
+ * dwell so the page doesn't whip past before the user sees it.
  *
- * No training run is involved. Phase 1.1 disconnects training from
- * the active flow; the underlying code is preserved but unreachable
- * from the user-facing path.
+ * Auto-opt-in: no source picker, no Connect buttons. One OS prompt,
+ * everything starts reading. The redact + manage surface is at
+ * /knowledge-update, after the fact.
  */
 
 interface SourceBreakdown {
@@ -49,6 +52,29 @@ export default function ReadingPage() {
   const lastTotalRef = useRef<number>(-1);
   const steadyCountRef = useRef<number>(0);
   const mountedAt = useRef<number>(Date.now());
+
+  // Auto-fire graph_kickoff once on mount. This is what triggers the
+  // macOS Full Disk Access prompt the first time an extractor reaches
+  // for a permission-gated source — so the user sees it the moment
+  // they land here, exactly once, without us asking them to click a
+  // Connect button first.
+  useEffect(() => {
+    if (!user?.pmcUserId || !isTauri()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        if (!cancelled) await invoke("graph_kickoff", { userId: user.pmcUserId });
+      } catch {
+        // graph_kickoff is best-effort; if it fails we still poll
+        // /v1/users/{id}/status — the user may already have data from a
+        // prior session.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.pmcUserId]);
 
   useEffect(() => {
     if (!user?.pmcUserId) return;

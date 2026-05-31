@@ -127,11 +127,11 @@ export function SettingsDrawer({
             <div className="flex flex-col gap-px overflow-hidden rounded-[10px] border-[0.5px] border-neutral-200 bg-neutral-200">
               <Row
                 icon={<Database className="size-4" strokeWidth={1.5} />}
-                label="Manage sources"
-                detail="Add more data, or remove what's connected."
+                label="Knowledge update"
+                detail="Pause sources, mark things private, search, or erase."
                 onClick={() => {
                   onClose();
-                  router.push("/connect");
+                  router.push("/knowledge-update");
                 }}
               />
             </div>

@@ -122,10 +122,10 @@ export default function RightNowPage() {
             Configure agent
           </Link>
           <Link
-            href="/connect"
+            href="/knowledge-update"
             className="text-sm text-foreground/45 hover:text-foreground/75"
           >
-            Manage sources
+            What I know
           </Link>
         </div>
       </div>

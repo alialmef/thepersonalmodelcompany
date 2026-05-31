@@ -88,7 +88,7 @@ function TauriSignIn() {
       // Bind any pre-existing anonymous pmcUserId to this account so
       // accumulated data (raw ingest, recall.db, etc.) survives.
       await claimAnonymousIfAny(result.session_token);
-      router.push("/connect");
+      router.push("/reading");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Couldn't sign in.";
       const friendlier = msg.includes("expired") || msg.includes("match")
