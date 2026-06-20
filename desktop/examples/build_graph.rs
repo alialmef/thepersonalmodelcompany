@@ -66,6 +66,8 @@ fn main() {
         ("voice_memos",      extract::voice_memos::run),
         // Phase 2 wave 3 — third-party comms
         ("slack",            extract::slack::run),
+        // Phase 2 wave 4 — explicit curation
+        ("bookmarks",        extract::bookmarks::run),
     ];
 
     for (name, f) in runs {

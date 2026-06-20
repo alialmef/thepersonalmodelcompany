@@ -45,6 +45,8 @@ pub enum Source {
     VoiceMemos,
     // Phase 2 wave 3 — third-party comms
     Slack,
+    // Phase 2 wave 4 — explicit curation
+    Bookmarks,
 }
 
 impl Source {
@@ -70,6 +72,7 @@ impl Source {
             Notifications   => StdDuration::from_secs(60 * 60),
             EditorState     => StdDuration::from_secs(60 * 60),
             Slack           => StdDuration::from_secs(60 * 60),
+            Bookmarks       => StdDuration::from_secs(60 * 60),
             Locations       => StdDuration::from_secs(2 * 60 * 60),
             VoiceMemos      => StdDuration::from_secs(2 * 60 * 60),
             // Slow:
@@ -98,6 +101,7 @@ impl Source {
             Source::Notifications   => "notifications",
             Source::VoiceMemos      => "voice_memos",
             Source::Slack           => "slack",
+            Source::Bookmarks       => "bookmarks",
         }
     }
 
@@ -107,7 +111,7 @@ impl Source {
           Music, Files, MailEnrich, NotesEnrich, Reminders,
           Chrome, ScreenTime, Shell, Locations,
           EditorState, Notifications, VoiceMemos,
-          Slack]
+          Slack, Bookmarks]
     }
 }
 
@@ -293,5 +297,6 @@ fn dispatch(source: Source, ctx: &ExtractCtx) -> Result<ExtractSummary, extract:
         Source::Notifications   => notifications::run(ctx),
         Source::VoiceMemos      => voice_memos::run(ctx),
         Source::Slack           => slack::run(ctx),
+        Source::Bookmarks       => bookmarks::run(ctx),
     }
 }
