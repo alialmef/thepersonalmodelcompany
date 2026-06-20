@@ -56,6 +56,16 @@ fn main() {
         ("mail_enrich",      extract::mail_enrich::run),
         ("notes_enrich",     extract::notes_enrich::run),
         ("reminders",        extract::reminders::run),
+        // Phase 2 wave 1 + 2
+        ("chrome",           extract::chrome::run),
+        ("screen_time",      extract::screen_time::run),
+        ("shell",            extract::shell::run),
+        ("locations",        extract::locations::run),
+        ("editor_state",     extract::editor_state::run),
+        ("notifications",    extract::notifications::run),
+        ("voice_memos",      extract::voice_memos::run),
+        // Phase 2 wave 3 — third-party comms
+        ("slack",            extract::slack::run),
     ];
 
     for (name, f) in runs {
