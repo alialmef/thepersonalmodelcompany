@@ -1363,11 +1363,15 @@ def create_app(
         @app.get("/v1/users/{user_id}/graph/counts")
         def graph_counts(user_id: str) -> dict[str, Any]:
             if not graph_store.exists(user_id):
-                return {"counts": {}, "total": 0}
+                return {"counts": {}, "total": 0, "raw_counts": {}}
             from pmc.storage.graph_store import NODE_KINDS
-            counts = graph_store.counts(user_id)
-            total = sum(counts.get(k, 0) for k in NODE_KINDS)
-            return {"counts": counts, "total": total}
+            # Quality-filtered counts are the surface contract — what
+            # the agent/UI actually sees. Raw counts available for
+            # debugging in `raw_counts`.
+            quality = graph_store.quality_counts(user_id)
+            raw = graph_store.counts(user_id)
+            total = sum(quality.get(k, 0) for k in NODE_KINDS)
+            return {"counts": quality, "total": total, "raw_counts": raw}
 
         # ----- Synthesis (agent-driven validation + reasoning) -----
         #

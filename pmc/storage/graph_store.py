@@ -131,6 +131,21 @@ class GraphStore:
                 out[kind] = 0
         return out
 
+    def quality_counts(self, user_id: str) -> dict[str, int]:
+        """Like `counts()` but filtered to the quality tier the agent
+        actually surfaces. Today: Persons must pass `_is_quality_person`
+        (drops the empty + phone-fragment-only records). Other kinds
+        pass through unchanged; their per-extractor filters are already
+        stricter."""
+        out: dict[str, int] = {}
+        for kind in ENTITY_FILENAMES:
+            if kind == "person":
+                n = sum(1 for v in self.iter_entities(user_id, kind) if _is_quality_person(v))
+                out[kind] = n
+            else:
+                out[kind] = self.count(user_id, kind)
+        return out
+
     def total_node_count(self, user_id: str) -> int:
         return sum(self.count(user_id, k) for k in NODE_KINDS)
 
@@ -203,6 +218,29 @@ def _weight_hint(v: dict[str, Any]) -> float | None:
     return None
 
 
+def _is_quality_person(v: dict[str, Any]) -> bool:
+    """A Person worth showing the agent has at least one signal-bearing
+    name field. Drops the empty `display_name: '' aliases: ['']` records
+    that some extractors emit when their row has a blank handle, and
+    the phone-fragment-only records (`aliases: ['48267']`) that the
+    agent shouldn't surface as 'people you know'."""
+    import re as _re
+    PHONEFRAG = _re.compile(r"^[\d\s\(\)\-\+]+$")
+    name = (v.get("display_name") or "").strip()
+    if name:
+        return True
+    aliases = [a.strip() for a in (v.get("aliases") or []) if isinstance(a, str) and a.strip()]
+    emails = [e for e in (v.get("emails") or []) if isinstance(e, str) and e.strip()]
+    # Email-only person — keep (they have an addressable identity)
+    if emails:
+        return True
+    # Phone-fragment-only aliases — drop (not surface-worthy)
+    if aliases and all(PHONEFRAG.match(a) for a in aliases):
+        return False
+    # Has a meaningful alias (not empty, not phone-fragment-only)
+    return bool(aliases)
+
+
 def summarize_for_agent(
     store: GraphStore, user_id: str, *, per_kind_limit: int = 8,
 ) -> dict[str, Any]:
@@ -215,21 +253,29 @@ def summarize_for_agent(
     budgets for any of the providers we support. This gets the agent
     enough to reason about "who", "where", "what", "when" without
     drowning it.
+
+    People are filtered through `_is_quality_person` before sampling —
+    the raw graph has thousands of empty / phone-fragment-only Persons
+    that would otherwise eat the agent's context budget with noise.
     """
     counts = store.counts(user_id)
     sample: dict[str, list[dict[str, Any]]] = {}
 
-    # People — names, alias counts, last seen
-    sample["people"] = [
-        {
+    # People — only quality-passing rows. Walk the file lazily and stop
+    # once we have enough so we don't load all 6k records when 8 suffice.
+    people_sample: list[dict[str, Any]] = []
+    for v in store.iter_entities(user_id, "person"):
+        if not _is_quality_person(v):
+            continue
+        people_sample.append({
             "id": v.get("id"),
             "display_name": v.get("display_name"),
             "aliases": (v.get("aliases") or [])[:3],
             "last_seen": v.get("last_seen"),
-        }
-        for v in store.sample(user_id, "person", per_kind_limit)
-        if v.get("display_name") or v.get("aliases")
-    ]
+        })
+        if len(people_sample) >= per_kind_limit:
+            break
+    sample["people"] = people_sample
 
     # Places — label, kind, last visit
     sample["places"] = [

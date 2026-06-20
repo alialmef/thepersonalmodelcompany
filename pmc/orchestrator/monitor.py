@@ -119,10 +119,13 @@ class Monitor:
         if self.registry is not None:
             status.registered_for_serving = user_id in self.registry
 
-        # Graph counts (the load-bearing add — what the Rust extractors
-        # actually produced, surfaced to the UI/agent for the first time).
+        # Graph counts. We report QUALITY-filtered counts to the UI —
+        # this is the post-filter view, which drops the 90% of Person
+        # records that are empty/phone-fragment noise. The raw counts
+        # are still available via `counts()` for debugging but the
+        # status surface only shows what's surface-worthy.
         if self.graph_store is not None and self.graph_store.exists(user_id):
-            counts = self.graph_store.counts(user_id)
+            counts = self.graph_store.quality_counts(user_id)
             status.graph_entity_counts = counts
             status.graph_node_total = sum(counts.get(k, 0) for k in NODE_KINDS)
 
