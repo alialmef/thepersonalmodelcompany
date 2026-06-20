@@ -47,6 +47,8 @@ pub enum Source {
     Slack,
     // Phase 2 wave 4 — explicit curation
     Bookmarks,
+    // Phase 2 wave 5 — money / commerce
+    Wallet,
 }
 
 impl Source {
@@ -73,6 +75,7 @@ impl Source {
             EditorState     => StdDuration::from_secs(60 * 60),
             Slack           => StdDuration::from_secs(60 * 60),
             Bookmarks       => StdDuration::from_secs(60 * 60),
+            Wallet          => StdDuration::from_secs(60 * 60),
             Locations       => StdDuration::from_secs(2 * 60 * 60),
             VoiceMemos      => StdDuration::from_secs(2 * 60 * 60),
             // Slow:
@@ -102,6 +105,7 @@ impl Source {
             Source::VoiceMemos      => "voice_memos",
             Source::Slack           => "slack",
             Source::Bookmarks       => "bookmarks",
+            Source::Wallet          => "wallet",
         }
     }
 
@@ -111,7 +115,7 @@ impl Source {
           Music, Files, MailEnrich, NotesEnrich, Reminders,
           Chrome, ScreenTime, Shell, Locations,
           EditorState, Notifications, VoiceMemos,
-          Slack, Bookmarks]
+          Slack, Bookmarks, Wallet]
     }
 }
 
@@ -298,5 +302,6 @@ fn dispatch(source: Source, ctx: &ExtractCtx) -> Result<ExtractSummary, extract:
         Source::VoiceMemos      => voice_memos::run(ctx),
         Source::Slack           => slack::run(ctx),
         Source::Bookmarks       => bookmarks::run(ctx),
+        Source::Wallet          => wallet::run(ctx),
     }
 }

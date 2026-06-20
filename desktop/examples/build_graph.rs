@@ -68,6 +68,8 @@ fn main() {
         ("slack",            extract::slack::run),
         // Phase 2 wave 4 — explicit curation
         ("bookmarks",        extract::bookmarks::run),
+        // Phase 2 wave 5 — money / commerce
+        ("wallet",           extract::wallet::run),
     ];
 
     for (name, f) in runs {
