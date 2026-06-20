@@ -30,6 +30,8 @@ pub mod voice_memos;
 pub mod slack;
 // Phase 2 wave 4 — explicit curation (bookmarks + reading list)
 pub mod bookmarks;
+// Phase 2 wave 5 — money / commerce (Apple Wallet passes)
+pub mod wallet;
 
 use crate::graph::{GraphStore, Watermarks};
 use std::sync::Arc;
