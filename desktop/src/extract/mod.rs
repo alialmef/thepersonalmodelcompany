@@ -32,6 +32,8 @@ pub mod slack;
 pub mod bookmarks;
 // Phase 2 wave 5 — money / commerce (Apple Wallet passes)
 pub mod wallet;
+// Phase 2 wave 6 — photo concept index (Apple's photo ML output)
+pub mod photo_concepts;
 
 use crate::graph::{GraphStore, Watermarks};
 use std::sync::Arc;

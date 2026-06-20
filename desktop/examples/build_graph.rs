@@ -70,6 +70,8 @@ fn main() {
         ("bookmarks",        extract::bookmarks::run),
         // Phase 2 wave 5 — money / commerce
         ("wallet",           extract::wallet::run),
+        // Phase 2 wave 6 — photo concept index (Apple's photo ML output)
+        ("photo_concepts",   extract::photo_concepts::run),
     ];
 
     for (name, f) in runs {
