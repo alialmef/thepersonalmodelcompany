@@ -26,6 +26,8 @@ pub mod locations;
 pub mod editor_state;
 pub mod notifications;
 pub mod voice_memos;
+// Phase 2 wave 3 — third-party comms (opens a new data domain)
+pub mod slack;
 
 use crate::graph::{GraphStore, Watermarks};
 use std::sync::Arc;

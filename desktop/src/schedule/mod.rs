@@ -43,6 +43,8 @@ pub enum Source {
     EditorState,
     Notifications,
     VoiceMemos,
+    // Phase 2 wave 3 — third-party comms
+    Slack,
 }
 
 impl Source {
@@ -67,6 +69,7 @@ impl Source {
             Shell           => StdDuration::from_secs(60 * 60),
             Notifications   => StdDuration::from_secs(60 * 60),
             EditorState     => StdDuration::from_secs(60 * 60),
+            Slack           => StdDuration::from_secs(60 * 60),
             Locations       => StdDuration::from_secs(2 * 60 * 60),
             VoiceMemos      => StdDuration::from_secs(2 * 60 * 60),
             // Slow:
@@ -94,6 +97,7 @@ impl Source {
             Source::EditorState     => "editor_state",
             Source::Notifications   => "notifications",
             Source::VoiceMemos      => "voice_memos",
+            Source::Slack           => "slack",
         }
     }
 
@@ -102,7 +106,8 @@ impl Source {
         &[Contacts, ImessageEnrich, Calendar, Photos, Safari, CallHistory,
           Music, Files, MailEnrich, NotesEnrich, Reminders,
           Chrome, ScreenTime, Shell, Locations,
-          EditorState, Notifications, VoiceMemos]
+          EditorState, Notifications, VoiceMemos,
+          Slack]
     }
 }
 
@@ -287,5 +292,6 @@ fn dispatch(source: Source, ctx: &ExtractCtx) -> Result<ExtractSummary, extract:
         Source::EditorState     => editor_state::run(ctx),
         Source::Notifications   => notifications::run(ctx),
         Source::VoiceMemos      => voice_memos::run(ctx),
+        Source::Slack           => slack::run(ctx),
     }
 }
