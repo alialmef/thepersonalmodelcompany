@@ -49,6 +49,8 @@ pub enum Source {
     Bookmarks,
     // Phase 2 wave 5 — money / commerce
     Wallet,
+    // Phase 2 wave 6 — photo concept index
+    PhotoConcepts,
 }
 
 impl Source {
@@ -76,6 +78,7 @@ impl Source {
             Slack           => StdDuration::from_secs(60 * 60),
             Bookmarks       => StdDuration::from_secs(60 * 60),
             Wallet          => StdDuration::from_secs(60 * 60),
+            PhotoConcepts   => StdDuration::from_secs(4 * 60 * 60),
             Locations       => StdDuration::from_secs(2 * 60 * 60),
             VoiceMemos      => StdDuration::from_secs(2 * 60 * 60),
             // Slow:
@@ -106,6 +109,7 @@ impl Source {
             Source::Slack           => "slack",
             Source::Bookmarks       => "bookmarks",
             Source::Wallet          => "wallet",
+            Source::PhotoConcepts   => "photo_concepts",
         }
     }
 
@@ -115,7 +119,7 @@ impl Source {
           Music, Files, MailEnrich, NotesEnrich, Reminders,
           Chrome, ScreenTime, Shell, Locations,
           EditorState, Notifications, VoiceMemos,
-          Slack, Bookmarks, Wallet]
+          Slack, Bookmarks, Wallet, PhotoConcepts]
     }
 }
 
@@ -303,5 +307,6 @@ fn dispatch(source: Source, ctx: &ExtractCtx) -> Result<ExtractSummary, extract:
         Source::Slack           => slack::run(ctx),
         Source::Bookmarks       => bookmarks::run(ctx),
         Source::Wallet          => wallet::run(ctx),
+        Source::PhotoConcepts   => photo_concepts::run(ctx),
     }
 }
