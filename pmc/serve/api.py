@@ -1494,6 +1494,24 @@ def create_app(
                 "patterns": [asdict(p) for p in patterns],
             }
 
+        @app.post("/v1/users/{user_id}/synthesis/drift/run")
+        def drift_run(user_id: str) -> dict[str, Any]:
+            from pmc.synthesis import build_drift
+            from dataclasses import asdict
+            drifts = build_drift(
+                graph_store=graph_store,
+                storage_root=storage_root,
+                user_id=user_id,
+            )
+            return {"ok": True, "count": len(drifts), "drift": [asdict(d) for d in drifts]}
+
+        @app.get("/v1/users/{user_id}/synthesis/drift")
+        def drift_get(user_id: str) -> dict[str, Any]:
+            from pmc.synthesis import load_drift
+            from dataclasses import asdict
+            drifts = load_drift(storage_root, user_id)
+            return {"count": len(drifts), "drift": [asdict(d) for d in drifts]}
+
         @app.get("/v1/users/{user_id}/synthesis/transcripts")
         def transcripts_get(user_id: str) -> dict[str, Any]:
             """Read the transcript manifest. Cheap — file read."""
