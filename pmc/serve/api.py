@@ -1512,6 +1512,24 @@ def create_app(
             drifts = load_drift(storage_root, user_id)
             return {"count": len(drifts), "drift": [asdict(d) for d in drifts]}
 
+        @app.post("/v1/users/{user_id}/synthesis/causal/run")
+        def causal_run(user_id: str) -> dict[str, Any]:
+            from pmc.synthesis import build_causal
+            from dataclasses import asdict
+            obs = build_causal(
+                graph_store=graph_store,
+                storage_root=storage_root,
+                user_id=user_id,
+            )
+            return {"ok": True, "count": len(obs), "causal": [asdict(o) for o in obs]}
+
+        @app.get("/v1/users/{user_id}/synthesis/causal")
+        def causal_get(user_id: str) -> dict[str, Any]:
+            from pmc.synthesis import load_causal
+            from dataclasses import asdict
+            obs = load_causal(storage_root, user_id)
+            return {"count": len(obs), "causal": [asdict(o) for o in obs]}
+
         @app.get("/v1/users/{user_id}/synthesis/transcripts")
         def transcripts_get(user_id: str) -> dict[str, Any]:
             """Read the transcript manifest. Cheap — file read."""

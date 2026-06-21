@@ -16,6 +16,11 @@ line a Thread the agent thinks is alive enough to surface. The
 `/right-now` endpoint reads from here.
 """
 
+from pmc.synthesis.causal import (
+    CausalObservation,
+    build_causal,
+    load_causal,
+)
 from pmc.synthesis.drift import (
     Drift,
     build_drift,
@@ -41,15 +46,18 @@ from pmc.synthesis.transcripts import (
 )
 
 __all__ = [
+    "CausalObservation",
     "Drift",
     "Pattern",
     "Thread",
     "ThreadEvidence",
     "Transcript",
+    "build_causal",
     "build_drift",
     "build_patterns",
     "build_threads",
     "check_transcription_tools",
+    "load_causal",
     "load_drift",
     "load_patterns",
     "load_threads",
