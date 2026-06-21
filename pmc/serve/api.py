@@ -1466,6 +1466,34 @@ def create_app(
             )
             return result
 
+        @app.post("/v1/users/{user_id}/synthesis/patterns/run")
+        def patterns_run(user_id: str) -> dict[str, Any]:
+            """Run pattern detection over the graph. Pure compute — no
+            agent call, fast enough to run on every screen load if we
+            wanted (currently triggered explicitly)."""
+            from pmc.synthesis import build_patterns
+            patterns = build_patterns(
+                graph_store=graph_store,
+                storage_root=storage_root,
+                user_id=user_id,
+            )
+            from dataclasses import asdict
+            return {
+                "ok": True,
+                "count": len(patterns),
+                "patterns": [asdict(p) for p in patterns],
+            }
+
+        @app.get("/v1/users/{user_id}/synthesis/patterns")
+        def patterns_get(user_id: str) -> dict[str, Any]:
+            from pmc.synthesis import load_patterns
+            patterns = load_patterns(storage_root, user_id)
+            from dataclasses import asdict
+            return {
+                "count": len(patterns),
+                "patterns": [asdict(p) for p in patterns],
+            }
+
         @app.get("/v1/users/{user_id}/synthesis/transcripts")
         def transcripts_get(user_id: str) -> dict[str, Any]:
             """Read the transcript manifest. Cheap — file read."""
