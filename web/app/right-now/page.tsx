@@ -5,64 +5,77 @@ import Link from "next/link";
 
 import { BrandMark } from "@/components/shared/brand-mark";
 import { useUser } from "@/hooks/use-user";
-
-const PMC_API_URL =
-  process.env.NEXT_PUBLIC_PMC_API_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  "http://localhost:8000";
+import {
+  getThreads,
+  runThreads,
+  type Thread,
+} from "@/lib/api/threads";
 
 /**
- * /right-now — Phase 1.1 terminal placeholder.
+ * /right-now — the first-boot moment.
  *
- * After ingest completes the user lands here. The actual product —
- * sub-agent swarm that reads the structured graph and surfaces the
- * single most-pressing thing right now — is the next phase of the
- * build. For now this page acknowledges the user is set up and
- * shows a small honest count of what's been structured so they can
- * see the system did something real.
+ * Reads graph/synth/threads.jsonl via /v1/users/{id}/synthesis/threads.
+ * If the file is empty, prompts the user to run a synthesis pass —
+ * which calls their configured frontier model with their structured
+ * graph as context and produces the threads to surface.
  */
 
-interface SourceBreakdown {
-  source_id: string;
-  kind: string;
-  item_count: number;
-}
+const URGENCY_LABEL: Record<string, string> = {
+  now: "Now",
+  this_week: "This week",
+  soon: "Soon",
+  someday: "Someday",
+};
 
-interface UserStatus {
-  raw_item_count?: number;
-  raw_source_breakdown?: SourceBreakdown[];
-}
+const URGENCY_ORDER = ["now", "this_week", "soon", "someday"];
 
 export default function RightNowPage() {
   const { user } = useUser();
-  const [status, setStatus] = useState<UserStatus | null>(null);
+  const userId = user?.pmcUserId ?? "";
 
+  const [threads, setThreads] = useState<Thread[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Initial load
   useEffect(() => {
-    if (!user?.pmcUserId) return;
+    if (!userId) return;
     let cancelled = false;
-    const load = async () => {
+    (async () => {
       try {
-        const r = await fetch(
-          `${PMC_API_URL}/v1/users/${encodeURIComponent(user.pmcUserId)}/status`,
-          { cache: "no-store" },
-        );
-        if (!r.ok || cancelled) return;
-        const data = (await r.json()) as UserStatus;
-        if (!cancelled) setStatus(data);
+        const r = await getThreads(userId);
+        if (!cancelled) setThreads(r.threads);
       } catch {
-        /* offline */
+        if (!cancelled) setThreads([]);
       }
-    };
-    load();
-    const t = setInterval(load, 15_000);
+    })();
     return () => {
       cancelled = true;
-      clearInterval(t);
     };
-  }, [user?.pmcUserId]);
+  }, [userId]);
 
-  const total = status?.raw_item_count ?? 0;
-  const sources = status?.raw_source_breakdown ?? [];
+  async function handleRunSynthesis() {
+    if (!userId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await runThreads(userId);
+      setThreads(r.threads);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Couldn't synthesize threads.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Group by urgency, in the canonical order
+  const grouped: Record<string, Thread[]> = {};
+  for (const t of threads ?? []) {
+    const u = URGENCY_ORDER.includes(t.urgency) ? t.urgency : "soon";
+    (grouped[u] ||= []).push(t);
+  }
 
   return (
     <main className="min-h-screen w-full bg-background text-foreground">
@@ -71,48 +84,57 @@ export default function RightNowPage() {
           <BrandMark />
         </div>
 
-        <div className="mt-16 space-y-12 text-foreground/85">
-          <div className="space-y-3">
-            <div className="text-xl font-semibold text-foreground">
-              Your data is structured.
-            </div>
-            <div className="text-base text-foreground/55">
-              {total > 0
-                ? `${total.toLocaleString()} items across ${sources.length} ${sources.length === 1 ? "source" : "sources"}.`
-                : "Reading is underway."}
-            </div>
+        <header className="mt-12 space-y-3 text-foreground/85">
+          <div className="text-2xl font-semibold text-foreground">
+            What you should get moving on.
           </div>
-
-          {sources.length > 0 && (
-            <div className="space-y-1.5 text-[15px] text-foreground/70">
-              {sources
-                .slice()
-                .sort((a, b) => (b.item_count ?? 0) - (a.item_count ?? 0))
-                .slice(0, 10)
-                .map((s) => (
-                  <div
-                    key={s.source_id}
-                    className="flex items-baseline justify-between gap-4"
-                  >
-                    <span className="text-foreground/60">{s.kind}</span>
-                    <span className="font-mono text-foreground/45 text-[13px]">
-                      {s.item_count.toLocaleString()}
-                    </span>
-                  </div>
-                ))}
-            </div>
-          )}
-
-          <div className="space-y-3 text-foreground/55">
-            <div>
-              The agent that reads everything and surfaces what's most pressing
-              for you right now is being built.
-            </div>
-            <div>
-              Your ingest will keep running in the background.
-            </div>
+          <div className="text-base text-foreground/55">
+            I read everything on your Mac. These are the threads I think
+            are in motion right now.
           </div>
-        </div>
+        </header>
+
+        {threads === null && (
+          <div className="mt-20 text-sm text-foreground/40">Loading…</div>
+        )}
+
+        {threads !== null && threads.length === 0 && (
+          <EmptyState busy={busy} error={error} onRun={handleRunSynthesis} />
+        )}
+
+        {threads !== null && threads.length > 0 && (
+          <>
+            <div className="mt-16 space-y-12">
+              {URGENCY_ORDER.map((u) =>
+                grouped[u] && grouped[u].length > 0 ? (
+                  <UrgencySection
+                    key={u}
+                    label={URGENCY_LABEL[u]}
+                    threads={grouped[u]}
+                  />
+                ) : null,
+              )}
+            </div>
+
+            <div className="mt-16">
+              <button
+                type="button"
+                onClick={handleRunSynthesis}
+                disabled={busy}
+                className={`text-sm transition-colors ${
+                  busy
+                    ? "cursor-default text-foreground/25"
+                    : "text-foreground/45 hover:text-foreground/75"
+                }`}
+              >
+                {busy ? "Reading again…" : "Read again"}
+              </button>
+            </div>
+            {error && (
+              <div className="mt-3 text-sm text-red-500">{error}</div>
+            )}
+          </>
+        )}
 
         <div className="mt-auto flex flex-wrap items-center gap-6 pt-16">
           <Link
@@ -130,5 +152,98 @@ export default function RightNowPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+function EmptyState({
+  busy,
+  error,
+  onRun,
+}: {
+  busy: boolean;
+  error: string | null;
+  onRun: () => void | Promise<void>;
+}) {
+  return (
+    <div className="mt-20 space-y-6">
+      <div className="text-base text-foreground/55">
+        I haven&apos;t read your life yet. When you&apos;re ready, I&apos;ll go through
+        the structure of what&apos;s on your Mac and name what&apos;s in motion.
+      </div>
+      <button
+        type="button"
+        onClick={onRun}
+        disabled={busy}
+        className={`text-base transition-colors ${
+          busy
+            ? "cursor-default text-foreground/25"
+            : "text-foreground/80 hover:text-foreground"
+        }`}
+      >
+        {busy ? "Reading…" : "Read my life"}
+      </button>
+      {error && <div className="text-sm text-red-500">{error}</div>}
+    </div>
+  );
+}
+
+function UrgencySection({
+  label,
+  threads,
+}: {
+  label: string;
+  threads: Thread[];
+}) {
+  return (
+    <section>
+      <div className="text-xs uppercase tracking-[0.18em] text-foreground/40 mb-6">
+        {label}
+      </div>
+      <div className="space-y-10">
+        {threads.map((t) => (
+          <ThreadCard key={t.id} thread={t} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ThreadCard({ thread }: { thread: Thread }) {
+  const [showEvidence, setShowEvidence] = useState(false);
+  return (
+    <article className="space-y-2">
+      <div className="text-[17px] text-foreground leading-snug">
+        {thread.headline}
+      </div>
+      {thread.body && (
+        <div className="text-sm text-foreground/60 leading-relaxed">
+          {thread.body}
+        </div>
+      )}
+      <div className="flex flex-wrap items-baseline gap-4 pt-1">
+        <span className="text-[11px] uppercase tracking-wider text-foreground/40">
+          {thread.kind.replace("_", " ")}
+        </span>
+        {thread.evidence.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowEvidence((v) => !v)}
+            className="text-xs text-foreground/45 hover:text-foreground/75"
+          >
+            {showEvidence ? "Hide source" : "Why this"}
+          </button>
+        )}
+      </div>
+      {showEvidence && (
+        <div className="mt-3 space-y-2 border-l border-foreground/15 pl-4">
+          {thread.evidence.map((e, i) => (
+            <div key={i} className="text-xs text-foreground/50">
+              <span className="text-foreground/35">{e.source}: </span>
+              <span className="italic">&ldquo;{e.excerpt}&rdquo;</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
   );
 }
