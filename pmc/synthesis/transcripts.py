@@ -296,3 +296,136 @@ def load_transcripts(storage_root: Path | str, user_id: str) -> list[Transcript]
         except Exception:
             continue
     return out
+
+
+# ---------------------------------------------------------------------------
+# Open-loop synthesis from transcripts — Phase 3 closure
+# ---------------------------------------------------------------------------
+
+
+def _extract_transcript_questions(text: str, max_per_file: int = 5) -> list[str]:
+    """Heuristic: pull lines that end in '?' from a transcript. Voice
+    memos often contain questions the user is musing on — those become
+    open loops worth surfacing alongside message-thread loops.
+
+    Filters:
+      - 5 ≤ length ≤ 200 chars (skip "?" alone or huge run-ons)
+      - Must have at least 2 alphabetic words
+      - Deduplicates after lowercase + whitespace normalization
+    """
+    import re
+    out: list[str] = []
+    seen: set[str] = set()
+    # Whisper output is one paragraph per logical chunk; split on
+    # sentence-ending punctuation to find question candidates.
+    candidates = re.split(r"(?<=[.?!])\s+", text)
+    for cand in candidates:
+        cand = cand.strip()
+        if not cand.endswith("?"):
+            continue
+        if len(cand) < 5 or len(cand) > 200:
+            continue
+        word_count = sum(1 for w in re.findall(r"[A-Za-z]+", cand) if len(w) > 1)
+        if word_count < 2:
+            continue
+        norm = " ".join(cand.lower().split())
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append(cand)
+        if len(out) >= max_per_file:
+            break
+    return out
+
+
+def write_transcript_open_loops(
+    *,
+    storage_root: Path | str,
+    user_id: str,
+) -> dict:
+    """Walk the transcript manifest, extract question lines as
+    OpenLoops, append to the graph's open_loops.jsonl.
+
+    OpenLoops written by this pass get source="voice_memo_transcript"
+    so the Rust synthesis pass can decay them on the same liveness
+    curve as message-thread loops.
+
+    Returns a summary dict.
+    """
+    import hashlib
+
+    storage_root = Path(storage_root)
+    transcripts = load_transcripts(storage_root, user_id)
+    if not transcripts:
+        return {"ok": False, "reason": "no transcripts available", "added": 0}
+
+    graph_dir = storage_root / "users" / user_id / "graph"
+    open_loops_path = graph_dir / "open_loops.jsonl"
+    graph_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build an existing-id set so re-runs deduplicate.
+    existing_ids: set[str] = set()
+    if open_loops_path.is_file():
+        for line in open_loops_path.open():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                v = json.loads(line)
+                if isinstance(v, dict) and v.get("id"):
+                    existing_ids.add(v["id"])
+            except Exception:
+                continue
+
+    added = 0
+    appended_lines: list[str] = []
+    now_iso = "2026-06-20T22:30:00Z"  # placeholder; replaced per-loop below
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    for t in transcripts:
+        if not t.transcript_path:
+            continue
+        try:
+            text = Path(t.transcript_path).read_text(errors="replace")
+        except OSError:
+            continue
+        # Use the file's mtime as "opened_at" so age decay works
+        try:
+            mtime_s = Path(t.audio_path).stat().st_mtime
+            opened_at = datetime.fromtimestamp(mtime_s, tz=timezone.utc).isoformat()
+        except OSError:
+            opened_at = now_iso
+
+        questions = _extract_transcript_questions(text)
+        for q in questions:
+            stable_input = f"voice_memo_transcript|{t.file_id}|{q}"
+            loop_id = hashlib.sha1(stable_input.encode("utf-8")).hexdigest()[:16]
+            if loop_id in existing_ids:
+                continue
+            existing_ids.add(loop_id)
+            loop = {
+                "id": loop_id,
+                "kind": "unanswered_question",
+                "summary": "",  # synthesizer will title it
+                "related_person_ids": [],
+                "related_theme_ids": [],
+                "excerpt": q,
+                "opened_at": opened_at,
+                "last_touched": opened_at,
+                "liveness": 0.5,  # transcripts decay from middling start
+                "sources": ["voice_memo_transcript"],
+            }
+            appended_lines.append(json.dumps(loop, default=str))
+            added += 1
+
+    if appended_lines:
+        with open_loops_path.open("a") as f:
+            for line in appended_lines:
+                f.write(line + "\n")
+
+    return {
+        "ok": True,
+        "added": added,
+        "total_open_loops_now": len(existing_ids),
+    }
