@@ -98,3 +98,39 @@ export async function runPatterns(userId: string): Promise<PatternsResponse> {
   const body = (await r.json()) as { ok: boolean; count: number; patterns: Pattern[] };
   return { count: body.count, patterns: body.patterns };
 }
+
+// ---------------------------------------------------------------------------
+// Drift — "what's most recent across categories"
+// ---------------------------------------------------------------------------
+
+export interface Drift {
+  id: string;
+  category: string;
+  headline: string;
+  detail: string;
+  metric: Record<string, unknown>;
+}
+
+export interface DriftResponse {
+  count: number;
+  drift: Drift[];
+}
+
+export async function getDrift(userId: string): Promise<DriftResponse> {
+  const r = await fetch(
+    `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/synthesis/drift`,
+    { cache: "no-store" },
+  );
+  if (!r.ok) return { count: 0, drift: [] };
+  return (await r.json()) as DriftResponse;
+}
+
+export async function runDrift(userId: string): Promise<DriftResponse> {
+  const r = await fetch(
+    `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/synthesis/drift/run`,
+    { method: "POST" },
+  );
+  if (!r.ok) return { count: 0, drift: [] };
+  const body = (await r.json()) as { ok: boolean; count: number; drift: Drift[] };
+  return { count: body.count, drift: body.drift };
+}

@@ -6,10 +6,13 @@ import Link from "next/link";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { useUser } from "@/hooks/use-user";
 import {
+  getDrift,
   getPatterns,
   getThreads,
+  runDrift,
   runPatterns,
   runThreads,
+  type Drift,
   type Pattern,
   type Thread,
 } from "@/lib/api/threads";
@@ -38,22 +41,25 @@ export default function RightNowPage() {
 
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [patterns, setPatterns] = useState<Pattern[]>([]);
+  const [drift, setDrift] = useState<Drift[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Initial load — fetch both threads and patterns in parallel
+  // Initial load — fetch threads, patterns, and drift in parallel
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
     (async () => {
       try {
-        const [t, p] = await Promise.all([
+        const [t, p, d] = await Promise.all([
           getThreads(userId),
           getPatterns(userId),
+          getDrift(userId),
         ]);
         if (!cancelled) {
           setThreads(t.threads);
           setPatterns(p.patterns);
+          setDrift(d.drift);
         }
       } catch {
         if (!cancelled) setThreads([]);
@@ -69,9 +75,13 @@ export default function RightNowPage() {
     setBusy(true);
     setError(null);
     try {
-      // Patterns first (pure compute, fast), then threads (agent call)
-      const p = await runPatterns(userId);
+      // Pure compute first (patterns + drift), then the agent call (threads)
+      const [p, d] = await Promise.all([
+        runPatterns(userId),
+        runDrift(userId),
+      ]);
       setPatterns(p.patterns);
+      setDrift(d.drift);
       const r = await runThreads(userId);
       setThreads(r.threads);
     } catch (e) {
@@ -117,6 +127,21 @@ export default function RightNowPage() {
 
         {threads !== null && threads.length > 0 && (
           <>
+            {drift.length > 0 && (
+              <section className="mt-16">
+                <div className="text-xs uppercase tracking-[0.18em] text-foreground/40 mb-6">
+                  Recently
+                </div>
+                <div className="space-y-3">
+                  {drift.slice(0, 6).map((d) => (
+                    <div key={d.id} className="text-[14px] text-foreground/75 leading-snug">
+                      {d.headline}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <div className="mt-16 space-y-12">
               {URGENCY_ORDER.map((u) =>
                 grouped[u] && grouped[u].length > 0 ? (
