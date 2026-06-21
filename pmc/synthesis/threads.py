@@ -214,6 +214,7 @@ def _build_user_context(
     people: list[dict[str, Any]],
     themes: list[dict[str, Any]],
     voice_memos: list[dict[str, str]] | None = None,
+    patterns: list[dict[str, Any]] | None = None,
 ) -> str:
     """The user-role message the agent gets back. Compact JSON so the
     agent can scan it cheaply."""
@@ -229,6 +230,12 @@ def _build_user_context(
         "## Live open loops (highest-liveness first)",
         json.dumps(loops, indent=2),
     ]
+    if patterns:
+        parts.extend([
+            "",
+            "## Patterns (what this user's life keeps doing — derived from full graph)",
+            json.dumps(patterns, indent=2),
+        ])
     if voice_memos:
         parts.extend([
             "",
@@ -241,6 +248,23 @@ def _build_user_context(
 # ---------------------------------------------------------------------------
 # Public entry points
 # ---------------------------------------------------------------------------
+
+
+def _select_patterns(
+    storage_root: Path | str, user_id: str,
+) -> list[dict[str, Any]]:
+    """Load the patterns layer so the agent can ground threads in
+    real lived patterns (travel routes, attention split, etc.)."""
+    from pmc.synthesis.patterns import load_patterns
+    pats = load_patterns(storage_root, user_id)
+    return [
+        {
+            "category": p.category,
+            "headline": p.headline,
+            "detail": p.detail,
+        }
+        for p in pats
+    ]
 
 
 def _select_recent_voice_memos(
@@ -281,6 +305,7 @@ async def build_threads(
     people = _select_people_index(graph_store, user_id)
     themes = _select_themes(graph_store, user_id)
     voice_memos = _select_recent_voice_memos(storage_root, user_id)
+    patterns = _select_patterns(storage_root, user_id)
 
     if not loops and not voice_memos:
         # No alive loops or voice memos → nothing for the agent to name.
@@ -288,7 +313,7 @@ async def build_threads(
         return []
 
     system_prompt = _compose_threads_prompt(user_email)
-    user_msg = _build_user_context(loops, people, themes, voice_memos)
+    user_msg = _build_user_context(loops, people, themes, voice_memos, patterns)
 
     provider = get_provider(provider_config["provider"])
     if provider is None:

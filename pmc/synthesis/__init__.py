@@ -16,6 +16,11 @@ line a Thread the agent thinks is alive enough to surface. The
 `/right-now` endpoint reads from here.
 """
 
+from pmc.synthesis.patterns import (
+    Pattern,
+    build_patterns,
+    load_patterns,
+)
 from pmc.synthesis.threads import (
     Thread,
     ThreadEvidence,
@@ -31,13 +36,16 @@ from pmc.synthesis.transcripts import (
 )
 
 __all__ = [
+    "Pattern",
     "Thread",
     "ThreadEvidence",
     "Transcript",
+    "build_patterns",
     "build_threads",
+    "check_transcription_tools",
+    "load_patterns",
     "load_threads",
     "load_transcripts",
     "transcribe_voice_memos",
-    "check_transcription_tools",
     "write_transcript_open_loops",
 ]
