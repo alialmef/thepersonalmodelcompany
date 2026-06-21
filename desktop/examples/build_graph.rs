@@ -72,6 +72,8 @@ fn main() {
         ("wallet",           extract::wallet::run),
         // Phase 2 wave 6 — photo concept index (Apple's photo ML output)
         ("photo_concepts",   extract::photo_concepts::run),
+        // Phase 3 wave 1 — iCloud Drive
+        ("icloud_drive",     extract::icloud_drive::run),
     ];
 
     for (name, f) in runs {

@@ -34,6 +34,8 @@ pub mod bookmarks;
 pub mod wallet;
 // Phase 2 wave 6 — photo concept index (Apple's photo ML output)
 pub mod photo_concepts;
+// Phase 3 wave 1 — iCloud Drive filing-cabinet walker
+pub mod icloud_drive;
 
 use crate::graph::{GraphStore, Watermarks};
 use std::sync::Arc;

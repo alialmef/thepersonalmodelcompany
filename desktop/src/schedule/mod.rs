@@ -51,6 +51,8 @@ pub enum Source {
     Wallet,
     // Phase 2 wave 6 — photo concept index
     PhotoConcepts,
+    // Phase 3 wave 1 — iCloud Drive
+    ICloudDrive,
 }
 
 impl Source {
@@ -79,6 +81,7 @@ impl Source {
             Bookmarks       => StdDuration::from_secs(60 * 60),
             Wallet          => StdDuration::from_secs(60 * 60),
             PhotoConcepts   => StdDuration::from_secs(4 * 60 * 60),
+            ICloudDrive     => StdDuration::from_secs(2 * 60 * 60),
             Locations       => StdDuration::from_secs(2 * 60 * 60),
             VoiceMemos      => StdDuration::from_secs(2 * 60 * 60),
             // Slow:
@@ -110,6 +113,7 @@ impl Source {
             Source::Bookmarks       => "bookmarks",
             Source::Wallet          => "wallet",
             Source::PhotoConcepts   => "photo_concepts",
+            Source::ICloudDrive     => "icloud_drive",
         }
     }
 
@@ -119,7 +123,7 @@ impl Source {
           Music, Files, MailEnrich, NotesEnrich, Reminders,
           Chrome, ScreenTime, Shell, Locations,
           EditorState, Notifications, VoiceMemos,
-          Slack, Bookmarks, Wallet, PhotoConcepts]
+          Slack, Bookmarks, Wallet, PhotoConcepts, ICloudDrive]
     }
 }
 
@@ -308,5 +312,6 @@ fn dispatch(source: Source, ctx: &ExtractCtx) -> Result<ExtractSummary, extract:
         Source::Bookmarks       => bookmarks::run(ctx),
         Source::Wallet          => wallet::run(ctx),
         Source::PhotoConcepts   => photo_concepts::run(ctx),
+        Source::ICloudDrive     => icloud_drive::run(ctx),
     }
 }
