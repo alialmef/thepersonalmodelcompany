@@ -1360,6 +1360,77 @@ def create_app(
                 return {"nodes": [], "edges": []}
             return graph_store.snapshot(user_id)
 
+        # ----- Synthesis: Threads (the user-visible "what's in motion") -----
+        #
+        # The agent-driven synthesis pass that names + categorizes the
+        # in-motion items the user should attend to. /right-now reads
+        # threads.jsonl. The Mac app or scheduler should trigger
+        # /threads/run periodically; the GET is cheap (file read) and
+        # safe to call on every screen mount.
+
+        @app.post("/v1/users/{user_id}/synthesis/threads/run")
+        async def threads_run(
+            user_id: str,
+            auth: Any = Depends(optional_session),
+        ) -> dict[str, Any]:
+            """Kick off one synthesis pass. Blocks until the agent
+            returns (fast enough for an explicit user-triggered
+            'refresh'; a scheduler could later move this to background)."""
+            from pmc.agent import crypto
+            from pmc.synthesis import build_threads
+            if not auth:
+                raise HTTPException(status_code=401, detail="sign in required")
+            auth_store = getattr(app.state, "auth_store", None)
+            if auth_store is None:
+                raise HTTPException(status_code=503, detail="auth not configured")
+            cfg = auth_store.get_provider_config(auth.account.id)
+            if not cfg:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"error": "no_provider", "message": "Configure your agent first."},
+                )
+            try:
+                api_key = crypto.decrypt(cfg["api_key_ciphertext"])
+            except Exception:
+                raise HTTPException(
+                    status_code=503,
+                    detail="couldn't unlock stored key",
+                )
+            try:
+                threads = await build_threads(
+                    graph_store=graph_store,
+                    storage_root=storage_root,
+                    user_id=user_id,
+                    user_email=auth.account.email,
+                    provider_config={
+                        "provider": cfg["provider"],
+                        "model": cfg["model"],
+                        "api_key": api_key,
+                    },
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error": "synthesis_failed", "message": str(e)[:300]},
+                )
+            return {
+                "ok": True,
+                "count": len(threads),
+                "threads": [t.to_json() for t in threads],
+            }
+
+        @app.get("/v1/users/{user_id}/synthesis/threads")
+        def threads_get(user_id: str) -> dict[str, Any]:
+            """Read the most-recent synthesized threads. Cheap — just a
+            JSONL file read. The Mac app's /right-now screen polls
+            this; if it's empty the screen prompts for /threads/run."""
+            from pmc.synthesis import load_threads
+            threads = load_threads(storage_root, user_id)
+            return {
+                "count": len(threads),
+                "threads": [t.to_json() for t in threads],
+            }
+
         @app.get("/v1/users/{user_id}/graph/counts")
         def graph_counts(user_id: str) -> dict[str, Any]:
             if not graph_store.exists(user_id):
