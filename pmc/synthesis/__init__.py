@@ -27,6 +27,7 @@ from pmc.synthesis.transcripts import (
     check_tools as check_transcription_tools,
     load_transcripts,
     transcribe_voice_memos,
+    write_transcript_open_loops,
 )
 
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "load_transcripts",
     "transcribe_voice_memos",
     "check_transcription_tools",
+    "write_transcript_open_loops",
 ]
