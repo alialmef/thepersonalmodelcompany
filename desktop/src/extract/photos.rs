@@ -185,7 +185,8 @@ pub fn run(ctx: &ExtractCtx) -> Result<ExtractSummary, ExtractError> {
     // Faces — best effort, schema-tolerant.
     let mut faces: Vec<Person> = Vec::new();
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT Z_PK, ZFULLNAME FROM ZPERSON WHERE ZFULLNAME IS NOT NULL",
+        "SELECT Z_PK, ZFULLNAME FROM ZPERSON \
+         WHERE ZFULLNAME IS NOT NULL AND LENGTH(TRIM(ZFULLNAME)) > 0",
     ) {
         if let Ok(iter) = stmt.query_map([], |row| {
             let pk: i64 = row.get(0)?;
@@ -194,11 +195,17 @@ pub fn run(ctx: &ExtractCtx) -> Result<ExtractSummary, ExtractError> {
         }) {
             for r in iter.flatten() {
                 let (pk, name) = r;
+                // Belt-and-suspenders — also reject names that are only
+                // whitespace at the Rust layer, since Apple's collation
+                // can sometimes admit zero-width characters through the
+                // LENGTH check.
+                let trimmed = name.trim().to_string();
+                if trimmed.is_empty() { continue; }
                 let pid = stable_id(&["photos_face", &pk.to_string()]);
                 faces.push(Person {
                     id: pid,
-                    display_name: Some(name.clone()),
-                    aliases: vec![name],
+                    display_name: Some(trimmed.clone()),
+                    aliases: vec![trimmed],
                     phones: vec![],
                     emails: vec![],
                     relationship: None,
