@@ -384,6 +384,71 @@ def _filing_pattern(graph_store: GraphStore, user_id: str) -> Pattern | None:
 # ---------------------------------------------------------------------------
 
 
+def _rhythm_pattern(graph_store: GraphStore, user_id: str) -> Pattern | None:
+    """Aggregate by_hour + by_dow across all AppUsage entries to surface
+    chronotype + workweek shape. The data was already in the Screen Time
+    extractor — no one was reading it as a pattern."""
+    hour_totals = [0] * 24
+    dow_totals = [0] * 7
+    any_data = False
+    for a in graph_store.iter_entities(user_id, "app"):
+        bh = a.get("by_hour") or []
+        bd = a.get("by_dow") or []
+        if not isinstance(bh, list) or not isinstance(bd, list):
+            continue
+        for h in range(min(24, len(bh))):
+            hour_totals[h] += int(bh[h] or 0)
+            any_data = True
+        for d in range(min(7, len(bd))):
+            dow_totals[d] += int(bd[d] or 0)
+    if not any_data:
+        return None
+    total_hours = sum(hour_totals)
+    if total_hours < 60:
+        return None
+
+    # Late-night vs morning ratio (00-04 vs 06-10)
+    late_night = sum(hour_totals[0:5])
+    early_morn = sum(hour_totals[6:11])
+    chronotype = (
+        "night owl" if late_night > early_morn * 1.5
+        else "morning person" if early_morn > late_night * 1.5
+        else "balanced"
+    )
+    peak_hour = max(range(24), key=lambda h: hour_totals[h])
+    DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    peak_day = DAYS[max(range(7), key=lambda d: dow_totals[d])]
+    weekend = dow_totals[5] + dow_totals[6]
+    weekday = sum(dow_totals[:5])
+    work_shape = (
+        "weekday-heavy" if weekday > weekend * 3
+        else "spread across the week" if weekend > weekday * 0.4
+        else "moderately weekday-leaning"
+    )
+    headline = f"You're a {chronotype}. Heaviest day is {peak_day}; peak hour is {peak_hour:02d}:00."
+    detail = (
+        f"Work shape: {work_shape}. "
+        f"Late-night (00-05): {late_night}m vs morning (06-11): {early_morn}m. "
+        f"Weekend total: {weekend}m vs weekday: {weekday}m."
+    )
+    return Pattern(
+        id="rhythm_chronotype",
+        category="rhythm",
+        headline=headline,
+        detail=detail,
+        metric={
+            "chronotype": chronotype,
+            "peak_hour": peak_hour,
+            "peak_day": peak_day,
+            "by_hour": hour_totals,
+            "by_dow": dow_totals,
+            "late_night_minutes": late_night,
+            "early_morning_minutes": early_morn,
+        },
+        examples=[],
+    )
+
+
 _DETECTORS = [
     _travel_pattern,
     _events_pattern,
@@ -392,6 +457,7 @@ _DETECTORS = [
     _curation_pattern,
     _creation_pattern,
     _filing_pattern,
+    _rhythm_pattern,
 ]
 
 
