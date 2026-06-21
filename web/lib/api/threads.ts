@@ -61,3 +61,40 @@ export async function runThreads(userId: string): Promise<ThreadsResponse> {
   const body = (await r.json()) as { ok: boolean; count: number; threads: Thread[] };
   return { count: body.count, threads: body.threads };
 }
+
+// ---------------------------------------------------------------------------
+// Patterns — "what your life keeps doing"
+// ---------------------------------------------------------------------------
+
+export interface Pattern {
+  id: string;
+  category: string;       // travel | events | attention | places | curation | creation | filing
+  headline: string;
+  detail: string;
+  metric: Record<string, unknown>;
+  examples: string[];
+}
+
+export interface PatternsResponse {
+  count: number;
+  patterns: Pattern[];
+}
+
+export async function getPatterns(userId: string): Promise<PatternsResponse> {
+  const r = await fetch(
+    `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/synthesis/patterns`,
+    { cache: "no-store" },
+  );
+  if (!r.ok) return { count: 0, patterns: [] };
+  return (await r.json()) as PatternsResponse;
+}
+
+export async function runPatterns(userId: string): Promise<PatternsResponse> {
+  const r = await fetch(
+    `${PMC_API_URL}/v1/users/${encodeURIComponent(userId)}/synthesis/patterns/run`,
+    { method: "POST" },
+  );
+  if (!r.ok) return { count: 0, patterns: [] };
+  const body = (await r.json()) as { ok: boolean; count: number; patterns: Pattern[] };
+  return { count: body.count, patterns: body.patterns };
+}

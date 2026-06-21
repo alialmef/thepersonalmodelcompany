@@ -6,8 +6,11 @@ import Link from "next/link";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { useUser } from "@/hooks/use-user";
 import {
+  getPatterns,
   getThreads,
+  runPatterns,
   runThreads,
+  type Pattern,
   type Thread,
 } from "@/lib/api/threads";
 
@@ -34,17 +37,24 @@ export default function RightNowPage() {
   const userId = user?.pmcUserId ?? "";
 
   const [threads, setThreads] = useState<Thread[] | null>(null);
+  const [patterns, setPatterns] = useState<Pattern[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Initial load
+  // Initial load — fetch both threads and patterns in parallel
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
     (async () => {
       try {
-        const r = await getThreads(userId);
-        if (!cancelled) setThreads(r.threads);
+        const [t, p] = await Promise.all([
+          getThreads(userId),
+          getPatterns(userId),
+        ]);
+        if (!cancelled) {
+          setThreads(t.threads);
+          setPatterns(p.patterns);
+        }
       } catch {
         if (!cancelled) setThreads([]);
       }
@@ -59,6 +69,9 @@ export default function RightNowPage() {
     setBusy(true);
     setError(null);
     try {
+      // Patterns first (pure compute, fast), then threads (agent call)
+      const p = await runPatterns(userId);
+      setPatterns(p.patterns);
       const r = await runThreads(userId);
       setThreads(r.threads);
     } catch (e) {
@@ -115,6 +128,19 @@ export default function RightNowPage() {
                 ) : null,
               )}
             </div>
+
+            {patterns.length > 0 && (
+              <section className="mt-20">
+                <div className="text-xs uppercase tracking-[0.18em] text-foreground/40 mb-6">
+                  What your life keeps doing
+                </div>
+                <div className="space-y-6">
+                  {patterns.map((p) => (
+                    <PatternCard key={p.id} pattern={p} />
+                  ))}
+                </div>
+              </section>
+            )}
 
             <div className="mt-16">
               <button
@@ -205,6 +231,24 @@ function UrgencySection({
         ))}
       </div>
     </section>
+  );
+}
+
+function PatternCard({ pattern }: { pattern: Pattern }) {
+  return (
+    <article className="space-y-1">
+      <div className="text-[15px] text-foreground/90 leading-snug">
+        {pattern.headline}
+      </div>
+      {pattern.detail && (
+        <div className="text-[13px] text-foreground/55 leading-relaxed">
+          {pattern.detail}
+        </div>
+      )}
+      <div className="text-[11px] uppercase tracking-wider text-foreground/40 pt-1">
+        {pattern.category}
+      </div>
+    </article>
   );
 }
 
