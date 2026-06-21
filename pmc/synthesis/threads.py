@@ -213,23 +213,55 @@ def _build_user_context(
     loops: list[dict[str, Any]],
     people: list[dict[str, Any]],
     themes: list[dict[str, Any]],
+    voice_memos: list[dict[str, str]] | None = None,
 ) -> str:
     """The user-role message the agent gets back. Compact JSON so the
     agent can scan it cheaply."""
-    return (
-        "Here is the user's structured graph for this synthesis pass.\n\n"
-        "## People directory (id → name)\n"
-        + json.dumps(people, indent=2)
-        + "\n\n## Active themes (label + 180d mention count)\n"
-        + json.dumps(themes, indent=2)
-        + "\n\n## Live open loops (highest-liveness first)\n"
-        + json.dumps(loops, indent=2)
-    )
+    parts = [
+        "Here is the user's structured graph for this synthesis pass.",
+        "",
+        "## People directory (id → name)",
+        json.dumps(people, indent=2),
+        "",
+        "## Active themes (label + 180d mention count)",
+        json.dumps(themes, indent=2),
+        "",
+        "## Live open loops (highest-liveness first)",
+        json.dumps(loops, indent=2),
+    ]
+    if voice_memos:
+        parts.extend([
+            "",
+            "## Recent voice memos (user speaking to themselves — strongest signal of internal state)",
+            json.dumps(voice_memos, indent=2),
+        ])
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
 # Public entry points
 # ---------------------------------------------------------------------------
+
+
+def _select_recent_voice_memos(
+    storage_root: Path | str, user_id: str, *, limit: int = 6,
+) -> list[dict[str, str]]:
+    """Pull recent voice memo transcripts as agent context. Memos are
+    the most candid signal in the graph — the user talking to themselves.
+    Limit to the most recent so we don't blow context budgets."""
+    from pmc.synthesis.transcripts import load_transcripts
+    items = load_transcripts(storage_root, user_id)
+    # transcripts manifest order ≈ extractor order; take the tail (most
+    # recently written) and reverse for newest-first.
+    selected = list(reversed(items))[:limit]
+    return [
+        {
+            "audio": (Path(t.audio_path).name if t.audio_path else "?"),
+            "excerpt": t.text_excerpt or "",
+        }
+        for t in selected
+        if t.text_excerpt
+    ]
 
 
 async def build_threads(
@@ -248,16 +280,15 @@ async def build_threads(
     loops = _select_live_loops(graph_store, user_id)
     people = _select_people_index(graph_store, user_id)
     themes = _select_themes(graph_store, user_id)
+    voice_memos = _select_recent_voice_memos(storage_root, user_id)
 
-    if not loops:
-        # No alive loops → nothing for the agent to name. Write empty
-        # and return so callers can treat "empty graph" as a normal
-        # state rather than an error.
+    if not loops and not voice_memos:
+        # No alive loops or voice memos → nothing for the agent to name.
         _write_threads(storage_root, user_id, [])
         return []
 
     system_prompt = _compose_threads_prompt(user_email)
-    user_msg = _build_user_context(loops, people, themes)
+    user_msg = _build_user_context(loops, people, themes, voice_memos)
 
     provider = get_provider(provider_config["provider"])
     if provider is None:

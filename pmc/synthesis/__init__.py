@@ -22,5 +22,20 @@ from pmc.synthesis.threads import (
     build_threads,
     load_threads,
 )
+from pmc.synthesis.transcripts import (
+    Transcript,
+    check_tools as check_transcription_tools,
+    load_transcripts,
+    transcribe_voice_memos,
+)
 
-__all__ = ["Thread", "ThreadEvidence", "build_threads", "load_threads"]
+__all__ = [
+    "Thread",
+    "ThreadEvidence",
+    "Transcript",
+    "build_threads",
+    "load_threads",
+    "load_transcripts",
+    "transcribe_voice_memos",
+    "check_transcription_tools",
+]

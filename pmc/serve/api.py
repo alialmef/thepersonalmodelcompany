@@ -1431,6 +1431,63 @@ def create_app(
                 "threads": [t.to_json() for t in threads],
             }
 
+        # ----- Voice memo transcription (synthesis layer Phase 3) -----
+        #
+        # Whisper.cpp runs on the user's Mac (not bundled into Tauri to
+        # keep first-launch lean). These endpoints surface the
+        # transcripts written by `pmc.synthesis.transcripts` to:
+        #   <storage_root>/users/<uid>/graph/synth/transcripts/<id>.txt
+        # A manifest at .../transcripts/_manifest.jsonl is the index.
+
+        @app.post("/v1/users/{user_id}/synthesis/transcripts/run")
+        def transcripts_run(
+            user_id: str,
+            limit: Optional[int] = None,
+            force: bool = False,
+            auth: Any = Depends(optional_session),
+        ) -> dict[str, Any]:
+            """Transcribe voice memos for this user. Synchronous — for a
+            user with hundreds of memos this can take minutes; the Mac
+            app is expected to call this from a background task and
+            poll /transcripts for progress.
+
+            Requires whisper-cli + ffmpeg + the ggml model on the
+            server's PATH. Returns a clear status with `reason` if
+            tools are missing."""
+            if not auth:
+                raise HTTPException(status_code=401, detail="sign in required")
+            from pmc.synthesis import transcribe_voice_memos
+            result = transcribe_voice_memos(
+                graph_store=graph_store,
+                storage_root=storage_root,
+                user_id=user_id,
+                limit=limit,
+                force=force,
+            )
+            return result
+
+        @app.get("/v1/users/{user_id}/synthesis/transcripts")
+        def transcripts_get(user_id: str) -> dict[str, Any]:
+            """Read the transcript manifest. Cheap — file read."""
+            from pmc.synthesis import load_transcripts, check_transcription_tools
+            tools = check_transcription_tools()
+            items = load_transcripts(storage_root, user_id)
+            return {
+                "tools_available": tools.ok,
+                "tools_reason": tools.reason,
+                "count": len(items),
+                "transcripts": [
+                    {
+                        "file_id": t.file_id,
+                        "audio_path": t.audio_path,
+                        "transcript_path": t.transcript_path,
+                        "text_excerpt": t.text_excerpt,
+                        "text_chars": t.text_chars,
+                    }
+                    for t in items
+                ],
+            }
+
         @app.get("/v1/users/{user_id}/graph/counts")
         def graph_counts(user_id: str) -> dict[str, Any]:
             if not graph_store.exists(user_id):
