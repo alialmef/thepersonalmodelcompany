@@ -35,7 +35,7 @@ err() { printf '\033[1;31m%s\033[0m\n' "$1" >&2; }
 # ---------------------------------------------------------------------------
 
 if ! command -v uv >/dev/null 2>&1; then
-    say "installing uv (python package manager)…"
+    say "installing uv (python package manager)..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
     # uv installs to ~/.local/bin or ~/.cargo/bin depending on platform
     export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
@@ -54,12 +54,12 @@ fi
 mkdir -p "$(dirname "$PMC_DIR")"
 
 if [ -d "$PMC_DIR/.git" ]; then
-    say "updating pmc at $PMC_DIR…"
+    say "updating pmc at $PMC_DIR..."
     git -C "$PMC_DIR" fetch --quiet origin "$BRANCH"
     git -C "$PMC_DIR" checkout --quiet "$BRANCH"
     git -C "$PMC_DIR" reset --hard --quiet "origin/$BRANCH"
 else
-    say "cloning pmc to $PMC_DIR…"
+    say "cloning pmc to $PMC_DIR..."
     git clone --quiet --branch "$BRANCH" "$REPO_URL" "$PMC_DIR"
 fi
 
@@ -67,7 +67,7 @@ fi
 # 3. install
 # ---------------------------------------------------------------------------
 
-say "installing the pmc CLI via uv…"
+say "installing the pmc CLI via uv..."
 cd "$PMC_DIR"
 # `uv tool install --reinstall` makes the `pmc` command available on
 # PATH (uv puts it in ~/.local/bin), isolated from your system python.
@@ -91,14 +91,14 @@ fi
 # if it's missing.
 
 if ! command -v cargo >/dev/null 2>&1; then
-    say "installing Rust toolchain (one-time)…"
+    say "installing Rust toolchain (one-time)..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     # rustup installs to ~/.cargo/bin
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
 if command -v cargo >/dev/null 2>&1; then
-    say "building pmc-ingest (Rust extractor)…"
+    say "building pmc-ingest (Rust extractor)..."
     if (cd "$PMC_DIR/desktop" && cargo build --example pmc_ingest --release --quiet); then
         say "✓ pmc-ingest built."
     else
