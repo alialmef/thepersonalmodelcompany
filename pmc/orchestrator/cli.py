@@ -253,6 +253,12 @@ def build_parser() -> argparse.ArgumentParser:
     delete.add_argument("--notes")
     delete.set_defaults(func=cmd_delete)
 
+    # The terminal-agent surface: chat / configure / config-show / whoami.
+    # Lives in pmc/cli/ so the old training pipeline and the new "talk
+    # to your agent" surface stay decoupled.
+    from pmc.cli.main import register as register_cli
+    register_cli(sub)
+
     return p
 
 

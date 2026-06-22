@@ -34,6 +34,29 @@ dependencies = [
     # (Anthropic / OpenAI / Google / OpenRouter). Fernet wraps the
     # keys with a server-side-derived secret. See pmc/agent/crypto.py.
     "cryptography>=42.0",
+    # Terminal UI for `pmc chat` — panels, streamed markdown rendering,
+    # spinners, tables. rich is the entire visual surface of the CLI.
+    "rich>=13.7",
+    # Input handling with history + ctrl-r search + multiline editing.
+    "prompt_toolkit>=3.0",
+    # Filesystem event watcher for `pmc watch` — wraps FSEvents on macOS,
+    # inotify on Linux. Used by pmc.watch.sources.fs to fire the gate on
+    # writes to Messages, Mail, voice memos, iCloud Drive, etc.
+    "watchdog>=4.0",
+    # PyObjC bridge — used by pmc.watch.sources.workspace to listen to
+    # NSWorkspace notifications (foreground app changes, sleep/wake,
+    # screen lock). macOS-only; pip resolves these conditionally.
+    "pyobjc-core>=10.0 ; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa>=10.0 ; sys_platform == 'darwin'",
+    # HTML parsing for the reading module — pulls Safari history URLs
+    # and extracts the readable main text so the agent can reconstruct
+    # lines of thinking from what was actually on screen.
+    "beautifulsoup4>=4.12",
+    # MCP — exposes the portrait + time model + reading layer to any
+    # connecting agent (Claude Desktop, Cursor, Continue, …).
+    # `pmc serve --mcp` is how PMC plugs into the rest of the
+    # agent ecosystem.
+    "mcp>=1.0",
 ]
 
 [project.scripts]
