@@ -119,13 +119,16 @@ cat <<'EOF'
 
 installed.
 
-next:
-    pmc doctor      # check that everything is set up correctly
-    pmc configure   # set your model provider + api key
-    pmc connect     # let pmc read your Mac (requires Full Disk Access)
-    pmc sandbox     # build the portrait
-    pmc install-mcp claude    # plug into Claude Desktop (or cursor / continue)
+next — one command walks you through everything:
 
-then restart your agent and ask it "what do you know about me?"
+    pmc onboard
+
+it'll run doctor, take your API key, extract your data (after FDA),
+build your portrait, and plug into Claude/Cursor/Continue. confirms
+at each step. then restart your agent and ask it "what do you know
+about me?"
+
+(prefer step-by-step?  pmc doctor → pmc configure → pmc connect →
+ pmc sandbox → pmc install-mcp claude)
 
 EOF

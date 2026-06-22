@@ -98,6 +98,10 @@ def register(sub: argparse._SubParsersAction) -> None:
     from pmc.cli.doctor import register as register_doctor
     register_doctor(sub)
 
+    # `pmc onboard` — chained first-time setup.
+    from pmc.cli.onboard import register as register_onboard
+    register_onboard(sub)
+
     # Teaching the gate: pmc remember / pmc forget write rows into
     # ~/.pmc/gate-feedback.jsonl that override the default rules.
     from pmc.cli.learn import register as register_learn
