@@ -65,13 +65,21 @@ pub fn run(ctx: &ExtractCtx) -> Result<ExtractSummary, ExtractError> {
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            let modified: Option<DateTime<Utc>> = meta
+            // Voice Memos filenames embed the original recording date:
+            //   "20141124 191401-45EFC2CD.m4a" → 2014-11-24 19:14:01
+            // iCloud sync routinely bumps the file mtime, so the
+            // on-disk mtime is unreliable for "when did this memo
+            // happen." Prefer the filename-derived date; fall back to
+            // mtime if the filename doesn't parse.
+            let modified_from_name = parse_date_from_filename(name);
+            let modified_from_mtime: Option<DateTime<Utc>> = meta
                 .modified()
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .and_then(|d| {
                     DateTime::<Utc>::from_timestamp(d.as_secs() as i64, d.subsec_nanos())
                 });
+            let modified = modified_from_name.or(modified_from_mtime);
             signals.push(FileSignal {
                 id: stable_id(&["voice_memo", &path.to_string_lossy()]),
                 path: path.to_string_lossy().to_string(),
@@ -106,6 +114,45 @@ pub fn run(ctx: &ExtractCtx) -> Result<ExtractSummary, ExtractError> {
         skipped: false,
         skip_reason: None,
     })
+}
+
+/// Parse Voice Memos filename into a UTC datetime when possible.
+/// Apple's Voice Memos app names files like:
+///   "20141124 191401-45EFC2CD.m4a"
+///   "20260615 114425.m4a"  (newer iCloud-synced layout, no UUID suffix)
+/// The leading 14 digits are YYYYMMDD HHMMSS in *local time*, which
+/// we treat as UTC for stable ordering — losing TZ accuracy is much
+/// less destructive than losing the year (which is what the bumped
+/// mtime does).
+fn parse_date_from_filename(name: &str) -> Option<DateTime<Utc>> {
+    use chrono::TimeZone;
+    // Strip trailing extension and UUID suffix (if any). The format is:
+    //   "YYYYMMDD HHMMSS[-<UUID>].<ext>"
+    let stem = name.split('.').next()?;
+    let head = stem.split('-').next()?;
+    let mut chars = head.chars();
+    // Must look like "YYYYMMDD HHMMSS"
+    let mut digits = String::new();
+    let mut saw_space = false;
+    for c in chars.by_ref() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+        } else if c == ' ' && !saw_space {
+            saw_space = true;
+        } else {
+            return None;
+        }
+    }
+    if digits.len() != 14 || !saw_space {
+        return None;
+    }
+    let year: i32 = digits[0..4].parse().ok()?;
+    let month: u32 = digits[4..6].parse().ok()?;
+    let day: u32 = digits[6..8].parse().ok()?;
+    let hour: u32 = digits[8..10].parse().ok()?;
+    let minute: u32 = digits[10..12].parse().ok()?;
+    let second: u32 = digits[12..14].parse().ok()?;
+    Utc.with_ymd_and_hms(year, month, day, hour, minute, second).single()
 }
 
 fn skipped(reason: &str) -> ExtractSummary {
