@@ -1,12 +1,49 @@
 # The Personal Model Company
 
-> Train an AI model on your own writing. You own it. Host it. Take it anywhere.
+> Have your AIs know you based on what you actually do — not what
+> you've typed into the chat window.
 
-PMC is a **native Mac app** that trains a personal LoRA adapter on top of an
-open-weights base model (Llama 3.1 8B / Qwen 3.6 27B / Kimi K2.6). Your
-writing — iMessage, Apple Notes, Mail, WhatsApp, browser history, documents —
-stays on your Mac until *you* trigger training. The trained adapter, the
-style profile, the audit log, and an export bundle are all yours.
+PMC is building a continuous picture of your computer life, and helps the
+agent you work with get to know you better.
+
+It runs locally on your Mac, watches your messages, mail, photos, calendar,
+voice memos, browsing, code, and locations as they change, and structures
+that flow into a personal knowledge graph + a continuously-refined model
+of you. Then it exposes that model to whichever agent you're using —
+Claude, Cursor, Continue, anything that speaks MCP — so the first prompt
+you type already lands with someone who knows you.
+
+You own the picture. It lives on your machine. You can take it anywhere.
+
+## Talk to it from a terminal
+
+If you just want to try it: one command installs the CLI, you point it
+at your own API key (Anthropic / OpenAI / Gemini / OpenRouter), and
+you're in a REPL with your agent.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/alialmef/thepersonalmodelcompany/main/scripts/install.sh | bash
+pmc configure   # pick provider + paste your key
+pmc chat        # start talking
+```
+
+`pmc chat` loads everything the Mac app has structured about you (the
+graph + synthesis layers — people, places, themes, live threads,
+patterns, drift, voice-memo transcripts) as the agent's context. If
+the Mac app isn't installed yet the graph is empty and the agent will
+say so plainly.
+
+Slash commands inside `pmc chat`:
+
+```
+/threads    list what the agent thinks is alive in your life right now
+/patterns   list the steady-state patterns of how you spend time
+/drift      list what's different about now vs the recent past
+/context    print the full context block the agent sees
+/reload     re-read the graph (after the Mac app has ingested more)
+/reset      clear conversation history (keep the context block)
+/quit
+```
 
 ## See it locally
 

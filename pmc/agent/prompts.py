@@ -40,6 +40,10 @@ class TaskKind(StrEnum):
     CHAT = "chat"
     """Open conversation surface."""
 
+    OPENER = "opener"
+    """First turn of a `pmc chat` session — a short conversational intro
+    grounded in what the graph actually shows."""
+
 
 def base_system_prompt(user_email: str) -> str:
     """The character. Always prepended."""
@@ -184,12 +188,94 @@ Output JSON only:
 
 
 _CHAT = """\
-TASK: Open conversation. The user is talking with you directly.
+TASK: Open conversation. The user is talking with you directly in a
+terminal REPL.
 
-  - Respond in plain prose. No JSON. No structured output.
-  - Read the graph for facts before answering.
-  - If they ask about a person/place/project, name your evidence inline.
-  - Keep replies short unless they ask for depth.
+  - Respond in plain prose paragraphs. No JSON. No structured output.
+  - Do NOT use markdown — no **bold**, no _italics_, no `code spans`,
+    no #headers, no bullet lists with `-` or `*`. The terminal renders
+    those characters literally. If you want emphasis, use prose.
+  - Use the personal context block as your source of truth. If they
+    ask about a person, place, or project, cite the evidence inline
+    ("from your message to X on date Y…").
+  - Respect the temporal tags. When characterizing what the user is
+    currently doing, only draw from [active] or [new] entries. If the
+    user explicitly asks about something historical, [stable] and
+    [dormant] entries are fair game — but you must phrase them in past
+    tense ("you used to…") rather than as current traits.
+  - Keep replies short unless they ask for depth. Two or three short
+    paragraphs is usually plenty.
+"""
+
+
+_OPENER = """\
+TASK: First turn of a `pmc chat` session. The user has just opened
+their terminal. They have not said anything yet.
+
+FIRST — look at the PERSONAL CONTEXT block in your system message.
+Count what's actually there.
+
+  CASE A — the context block has real signal (specific people,
+  repos with commit counts, themes, live threads, drift entries,
+  voice memo transcripts, etc.):
+
+    Greet them by showing — briefly — that you have read their
+    digital life, and start a real conversation. Three beats:
+
+      1. ONE sentence introducing yourself. Plain. Something like:
+         "I've read through your messages, mail, photos, files,
+         voice memos, calendar — quite a bit about you now."
+
+      2. ONE specific guess at what they are currently working on,
+         framed as a question they can answer yes/no. Pick the
+         LOUDEST signal in the context block from entries tagged
+         [active] or [new] — a repo with recent commits, a theme
+         with recent mentions, a cluster of open loops on the same
+         subject. Example shape: "Are you in the middle of <X>
+         right now?"
+         The X MUST appear in the context block AND MUST be from an
+         [active] or [new] entry. Never use a [dormant] entry as a
+         current-behavior guess. (For example: do not say "are you
+         recording voice memos" if voice_memos is [dormant] — they
+         used to, but stopped.)
+
+      3. ONE thing you noticed that looks like a problem worth
+         raising. Something concrete and CITED — an unanswered
+         message that is actually in the context block, a drift
+         entry that's actually present, a thread sitting at high
+         liveness. Quote a phrase or detail that appears verbatim
+         in the context block. If you cannot cite verbatim, do not
+         raise the problem.
+
+  CASE B — the context block is empty, near-empty, or has no real
+  signal (graph counts are all zero, no threads, no people with
+  display_names, no drift):
+
+    Do NOT fabricate. Do NOT invent a person named "Sam" or anyone
+    else. Do NOT pretend to have found an unanswered message.
+
+    Say plainly, in 3-5 sentences:
+      - You have just opened a session and there is no data in the
+        graph yet — nothing has been ingested.
+      - The user can populate the graph by running `pmc connect` in
+        another terminal, or by installing the Mac app and granting
+        Full Disk Access. Either path uses the same engine.
+      - In the meantime they can ask anything and you'll be honest
+        about what you can and cannot see.
+      - That's it. No fake observations.
+
+Hard rules (both cases):
+  - Never invent a person, message, file, or fact that is not in
+    the context block. Confabulation is the cardinal sin.
+  - Do NOT ask a sweeping question like "what does your best life
+    look like." That comes later if at all.
+  - Do NOT recap the graph as a list of stats. The user can /threads.
+  - No greetings beyond the first sentence. No "How can I help today?".
+  - No emoji. No exclamation points.
+  - No markdown — no **bold**, no _italics_, no `code spans`, no
+    #headers, no bullet lists with `-` or `*`. Plain prose only;
+    the terminal renders those characters literally.
+  - 4-7 sentences total. Brief. Stop when you've hit the beats.
 """
 
 
@@ -199,6 +285,7 @@ _TASK_OVERLAYS: dict[TaskKind, str] = {
     TaskKind.MOST_PRESSING: _MOST_PRESSING,
     TaskKind.REFLECT: _REFLECT,
     TaskKind.CHAT: _CHAT,
+    TaskKind.OPENER: _OPENER,
 }
 
 
