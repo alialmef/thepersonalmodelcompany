@@ -122,22 +122,141 @@ def _step_connect(console: Console, yes: bool) -> bool:
                "voice memos, browser history, code repos, and shell history. "
                "everything stays on your machine.")
     console.print()
-    ui.say(console,
-           "this needs Full Disk Access (FDA) on whichever terminal you're "
-           "running pmc from.",
-           style=ui.ACCENT)
-    ui.say_dim(console,
-               "fix: System Settings → Privacy & Security → Full Disk Access "
-               "→ add Terminal.app (or iTerm, Cursor, etc.)")
+
+    # Probe whether FDA is already granted (read-only chat.db / History.db).
+    fda_ok, parent_app = _check_fda_with_parent()
+
+    if fda_ok:
+        ui.say(console, f"{ui.GLYPH_DONE} Full Disk Access already granted",
+               style=ui.OK)
+    else:
+        ui.say(console,
+               f"Full Disk Access is not granted to {parent_app}.",
+               style=ui.WARN)
+        ui.say_dim(console,
+                   f"pmc reads system databases that require this permission. "
+                   f"without it, most extractors will return empty.")
+        console.print()
+        if yes or Confirm.ask(
+            f"[dim]open System Settings → Full Disk Access for you? "
+            f"(you'll need to drag {parent_app} into the list)[/]",
+            default=True,
+        ):
+            _open_fda_pane()
+            console.print()
+            ui.say(console,
+                   f"In the window that just opened:",
+                   style=ui.ACCENT)
+            ui.say_dim(console,
+                       f"  1. click the + button at the bottom of the FDA list")
+            ui.say_dim(console,
+                       f"  2. add {parent_app}  (often under Applications "
+                       f"or Applications/Utilities)")
+            ui.say_dim(console,
+                       f"  3. toggle the switch next to it to ON")
+            ui.say_dim(console,
+                       f"  4. you may be prompted to quit & relaunch "
+                       f"{parent_app} — do that, then re-run "
+                       f"`pmc onboard`")
+            console.print()
+            if not yes and not Confirm.ask(
+                "[dim]done? proceed with extraction now?[/]",
+                default=True,
+            ):
+                ui.say_dim(console, "(paused — run `pmc onboard` again when ready)")
+                return True
+        else:
+            ui.say_dim(console, "(skipped — run `pmc connect` later)")
+            return True
+
     console.print()
     if not yes and not Confirm.ask(
-        "[dim]have you granted FDA and are ready to extract? (~3 minutes)[/]",
+        "[dim]ready to extract? (~3 minutes)[/]",
         default=True,
     ):
-        ui.say_dim(console, "(skipped — run `pmc connect` later when ready)")
+        ui.say_dim(console, "(skipped — run `pmc connect` later)")
         return True
     rc = subprocess.call(["pmc", "connect"])
     return rc in (0, None)
+
+
+def _open_fda_pane() -> None:
+    """Pop open System Settings → Privacy & Security → Full Disk Access.
+    Uses the macOS x-apple.systempreferences: URL scheme."""
+    try:
+        subprocess.run(
+            ["open",
+             "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"],
+            check=False, timeout=3,
+        )
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+
+def _check_fda_with_parent() -> tuple[bool, str]:
+    """Return (granted, parent_app_name). parent_app_name is the
+    .app the user needs to drag into FDA if it's not granted yet."""
+    import os
+    import sqlite3
+    from pathlib import Path
+
+    home = Path.home()
+    chat_db = home / "Library/Messages/chat.db"
+    history_db = home / "Library/Safari/History.db"
+    target = chat_db if chat_db.is_file() else (
+        history_db if history_db.is_file() else None
+    )
+    granted = True
+    if target is not None:
+        try:
+            conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=2.0)
+            try:
+                conn.execute("SELECT 1").fetchone()
+            finally:
+                conn.close()
+        except (sqlite3.OperationalError, PermissionError):
+            granted = False
+
+    # Walk up the process tree until we find an `.app` ancestor.
+    # Direct parent is usually the shell (zsh/bash), which isn't what
+    # the user needs to add to FDA — Terminal.app / iTerm.app / Cursor.app
+    # etc. is what needs the grant.
+    parent = "your terminal app"
+    try:
+        pid = os.getppid()
+        for _ in range(10):  # cap the walk
+            # `comm` truncates on macOS; `args` (full command) doesn't.
+            # First field is the executable, then the parent PID we
+            # get from a second `ps` call to avoid parsing whitespace
+            # inside args.
+            args_res = subprocess.run(
+                ["ps", "-ww", "-o", "args=", "-p", str(pid)],
+                capture_output=True, text=True, timeout=2,
+            )
+            ppid_res = subprocess.run(
+                ["ps", "-o", "ppid=", "-p", str(pid)],
+                capture_output=True, text=True, timeout=2,
+            )
+            if args_res.returncode != 0 or ppid_res.returncode != 0:
+                break
+            cmdline = args_res.stdout.strip()
+            ppid_str = ppid_res.stdout.strip()
+            if not cmdline:
+                break
+            if ".app/" in cmdline:
+                # e.g. /Applications/iTerm.app/Contents/MacOS/iTerm2 -psn_...
+                app = cmdline.split(".app/")[0].split("/")[-1] + ".app"
+                parent = app
+                break
+            try:
+                pid = int(ppid_str)
+            except ValueError:
+                break
+            if pid <= 1:
+                break
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return granted, parent
 
 
 def _step_sandbox(console: Console, yes: bool) -> bool:

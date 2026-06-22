@@ -294,26 +294,13 @@ def _check_fda() -> tuple[bool, str]:
 def _fda_remediation() -> str:
     """Try to identify which terminal/parent process is running, so the
     fix message can name the exact app the user needs to add."""
-    import os
-    parent_name = None
-    try:
-        ppid = os.getppid()
-        # ps -o comm= -p <ppid> gives just the executable name
-        res = subprocess.run(
-            ["ps", "-o", "comm=", "-p", str(ppid)],
-            capture_output=True, text=True, timeout=2,
-        )
-        if res.returncode == 0:
-            parent_name = res.stdout.strip().split("/")[-1]
-    except (subprocess.SubprocessError, OSError):
-        pass
-    target_app = parent_name or "your terminal app"
-
+    from pmc.cli.onboard import _check_fda_with_parent
+    _, parent_app = _check_fda_with_parent()
     return (
         f"Fix: open System Settings → Privacy & Security → "
-        f"Full Disk Access → click `+` → add {target_app} "
-        f"(if you're running PMC from Cursor or VSCode, add THAT — "
-        f"the permission is per-application). Then re-run `pmc connect`."
+        f"Full Disk Access → click `+` → add {parent_app}, toggle it ON, "
+        f"then re-run `pmc connect`. (run `pmc onboard` to have pmc open "
+        f"that settings page for you.)"
     )
 
 
