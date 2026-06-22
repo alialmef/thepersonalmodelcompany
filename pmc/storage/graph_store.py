@@ -220,17 +220,27 @@ def _weight_hint(v: dict[str, Any]) -> float | None:
 
 def _is_quality_person(v: dict[str, Any]) -> bool:
     """A Person worth showing the agent has at least one signal-bearing
-    name field. Drops the empty `display_name: '' aliases: ['']` records
-    that some extractors emit when their row has a blank handle, and
-    the phone-fragment-only records (`aliases: ['48267']`) that the
-    agent shouldn't surface as 'people you know'."""
+    name field. Drops:
+      - empty `display_name: '' aliases: ['']` records that some
+        extractors emit when their row has a blank handle
+      - phone-fragment-only records (`aliases: ['48267']`) — not
+        surface-worthy as 'people you know'
+      - `urn:biz:...` aliases — Apple Business Messaging system IDs
+        (businesses you got an iMessage from via Business Connect),
+        not actual people
+    """
     import re as _re
     PHONEFRAG = _re.compile(r"^[\d\s\(\)\-\+]+$")
     name = (v.get("display_name") or "").strip()
     if name:
         return True
-    aliases = [a.strip() for a in (v.get("aliases") or []) if isinstance(a, str) and a.strip()]
-    emails = [e for e in (v.get("emails") or []) if isinstance(e, str) and e.strip()]
+    aliases_raw = [a.strip() for a in (v.get("aliases") or []) if isinstance(a, str) and a.strip()]
+    # Drop urn:/x-/system identifiers — Apple Business Messaging etc.
+    aliases = [a for a in aliases_raw if not _is_system_identifier(a)]
+    emails = [
+        e for e in (v.get("emails") or [])
+        if isinstance(e, str) and e.strip() and not _is_system_identifier(e)
+    ]
     # Email-only person — keep (they have an addressable identity)
     if emails:
         return True
@@ -239,6 +249,16 @@ def _is_quality_person(v: dict[str, Any]) -> bool:
         return False
     # Has a meaningful alias (not empty, not phone-fragment-only)
     return bool(aliases)
+
+
+def _is_system_identifier(s: str) -> bool:
+    """True for strings that look like programmatic identifiers rather
+    than human-readable contacts. Catches Apple Business Messaging
+    URNs (`urn:biz:6e67a89b-...`), generic URNs, and tel:/x- schemes."""
+    low = s.strip().lower()
+    if low.startswith(("urn:", "x-", "tel:")):
+        return True
+    return False
 
 
 def summarize_for_agent(
