@@ -1,6 +1,6 @@
 """Pairwise reward model — small "sounds like me" scorer.
 
-A Likert-style RM pattern trains a model that outputs scores per dimension.
+A Likert-style RM would output scores per dimension.
 For PMC V0, we use TRL's `RewardTrainer` to train a much simpler pairwise
 preference model: given two responses to the same prompt, predict which one
 the user prefers (i.e. which sounds more like them).

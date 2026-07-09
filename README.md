@@ -72,7 +72,6 @@ thepersonalmodelcompany/
   scripts/
     dev.sh            One-command local dev launcher
   pyproject.toml      uv-managed Python deps with optional extras
-  personal-model-company-analysis.md   The original architecture spec
 ```
 
 ## Status (May 2026)
@@ -90,7 +89,6 @@ thepersonalmodelcompany/
   Railway (marketing site + billing) + Cloudflare (DNS + CDN). Production
   not yet deployed.
 
-See the `MEMORY.md` notes for the full set of design + product decisions.
 
 ## Run the backend tests
 

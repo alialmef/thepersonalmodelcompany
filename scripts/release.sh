@@ -12,11 +12,10 @@
 #   2. Notarization credentials stored under keychain profile "pmc-notary":
 #      xcrun notarytool store-credentials "pmc-notary" \
 #        --apple-id "your-apple-id@example.com" \
-#        --team-id "XQGY763JPD" \
+#        --team-id "YOUR_TEAM_ID" \
 #        --password "your-app-specific-password"
 #
 #      App-specific passwords: appleid.apple.com → App-Specific Passwords
-#      (Already configured on this machine as of 2026-05-19.)
 #
 # What this script does:
 #   - Builds the Tauri app via `cargo tauri build` (signs as part of build)

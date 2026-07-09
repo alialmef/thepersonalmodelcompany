@@ -1,8 +1,7 @@
 """Prompt templates for LLM judges.
 
-The pairwise and Likert prompts are adapted from standard judge-prompt patterns.
-We keep them as pure functions returning strings so they're easy to swap and
-test independently.
+Standard pairwise and Likert judge prompts. We keep them as pure functions
+returning strings so they're easy to swap and test independently.
 """
 
 from __future__ import annotations

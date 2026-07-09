@@ -368,7 +368,7 @@ Start with the act you find weakest in the current state. Move from there.
 - Frontend (web + in-Tauri webview): `web/` (Next.js 15 + React 19 +
   Tailwind 4 + shadcn-style primitives in `web/components/`)
 - Mac native shell + Rust ingestion: `desktop/` (Tauri 2)
-- Memory notes (every product decision): `~/.claude/projects/-Users-REDACTED-Desktop-Sites-thepersonalmodelcompany/memory/`
+- Memory notes (every product decision): kept privately outside the repo
 - Run it locally: `./scripts/dev.sh`
 
 ---
