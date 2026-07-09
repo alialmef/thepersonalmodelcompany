@@ -2,6 +2,7 @@
 name = "pmc"
 version = "0.1.0"
 description = "Personal Model Company — train personal AI models from your own data"
+license = { file = "LICENSE.md" }
 requires-python = ">=3.12"
 dependencies = [
     # Core schema layer used everywhere

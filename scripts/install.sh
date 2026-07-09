@@ -12,13 +12,10 @@
 #   1. Ensures uv (the Python package manager) is installed
 #   2. Clones (or updates) the repo into ~/.pmc/src
 #   3. Installs the `pmc` CLI into the user's uv tool store
-#   4. Runs `pmc configure` to set up provider + key
-#   5. Tells them to run `pmc chat`
-#
-# What this does NOT do (yet):
-#   - It does NOT install the Rust extractors. Those live in the Mac
-#     app and need notarization + FDA. Until the Mac app ships, the
-#     CLI runs against an empty graph and the agent will say so.
+#   4. Installs the pmc-ingest extractor: downloads the prebuilt
+#      universal macOS binary from GitHub Releases, falling back to a
+#      from-source cargo build (needs Rust + Xcode Command Line Tools)
+#   5. Tells them to run `pmc onboard`
 
 set -euo pipefail
 
@@ -81,34 +78,78 @@ if ! command -v pmc >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# 4. build the Rust extractor (pmc-ingest)
+# 4. the Rust extractor (pmc-ingest)
 # ---------------------------------------------------------------------------
 
 # pmc-ingest is the binary that walks the user's Mac data sources and
-# writes the personal knowledge graph. Building it here means
-# `pmc connect` works the first time without the user having to
-# manually invoke cargo. Requires Rust on the machine; we install it
-# if it's missing.
+# writes the personal knowledge graph. Without it, `pmc connect` cannot
+# do anything and the graph stays empty — so this step matters.
+#
+# Preferred path: download the prebuilt universal (arm64 + x86_64)
+# binary from GitHub Releases. Fallback: build from source, which needs
+# Rust and the Xcode Command Line Tools and takes several minutes.
 
-if ! command -v cargo >/dev/null 2>&1; then
-    say "installing Rust toolchain (one-time)..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    # rustup installs to ~/.cargo/bin
-    export PATH="$HOME/.cargo/bin:$PATH"
-fi
+PMC_BIN_DIR="$HOME/.pmc/bin"
+INGEST_URL="${PMC_INGEST_URL:-https://github.com/alialmef/thepersonalmodelcompany/releases/latest/download/pmc-ingest-macos-universal.tar.gz}"
 
-if command -v cargo >/dev/null 2>&1; then
-    say "building pmc-ingest (Rust extractor)..."
-    if (cd "$PMC_DIR/desktop" && cargo build --example pmc_ingest --release --quiet); then
-        say "✓ pmc-ingest built."
-    else
-        warn "cargo build failed. you can retry later with:"
-        warn "    cd $PMC_DIR/desktop && cargo build --example pmc_ingest --release"
+install_prebuilt_ingest() {
+    say "downloading prebuilt pmc-ingest..."
+    mkdir -p "$PMC_BIN_DIR"
+    local tmp
+    tmp="$(mktemp -d)"
+    if curl -sfL "$INGEST_URL" -o "$tmp/pmc-ingest.tar.gz" \
+        && tar -xzf "$tmp/pmc-ingest.tar.gz" -C "$tmp" pmc-ingest \
+        && install -m 755 "$tmp/pmc-ingest" "$PMC_BIN_DIR/pmc-ingest" \
+        && "$PMC_BIN_DIR/pmc-ingest" --help >/dev/null 2>&1; then
+        rm -rf "$tmp"
+        say "✓ pmc-ingest installed ($PMC_BIN_DIR/pmc-ingest)."
+        return 0
     fi
-else
-    warn "cargo (Rust) couldn't be installed automatically."
-    warn "to enable graph extraction, install Rust manually:"
-    warn "    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    rm -rf "$tmp"
+    return 1
+}
+
+build_ingest_from_source() {
+    # Xcode Command Line Tools are required to link macOS frameworks.
+    if ! xcode-select -p >/dev/null 2>&1; then
+        err "building from source needs the Xcode Command Line Tools."
+        err "install them with:    xcode-select --install"
+        err "then re-run this installer."
+        return 1
+    fi
+    if ! command -v cargo >/dev/null 2>&1; then
+        say "installing Rust toolchain (one-time)..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        export PATH="$HOME/.cargo/bin:$PATH"
+    fi
+    if ! command -v cargo >/dev/null 2>&1; then
+        err "cargo (Rust) couldn't be installed automatically."
+        err "install Rust manually, then re-run this installer:"
+        err "    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        return 1
+    fi
+    say "building pmc-ingest from source (several minutes on first build)..."
+    if (cd "$PMC_DIR/desktop" && cargo build --example pmc_ingest --release --quiet); then
+        mkdir -p "$PMC_BIN_DIR"
+        install -m 755 "$PMC_DIR/desktop/target/release/examples/pmc_ingest" \
+            "$PMC_BIN_DIR/pmc-ingest"
+        say "✓ pmc-ingest built and installed ($PMC_BIN_DIR/pmc-ingest)."
+        return 0
+    fi
+    err "cargo build failed. you can retry later with:"
+    err "    cd $PMC_DIR/desktop && cargo build --example pmc_ingest --release"
+    return 1
+}
+
+if ! install_prebuilt_ingest; then
+    warn "prebuilt download failed — falling back to a source build."
+    if ! build_ingest_from_source; then
+        err ""
+        err "pmc-ingest is NOT installed. the pmc CLI will still work,"
+        err "but 'pmc connect' cannot extract your data until it is."
+        err "fix the issue above and re-run this installer."
+        exit 1
+    fi
 fi
 
 # ---------------------------------------------------------------------------

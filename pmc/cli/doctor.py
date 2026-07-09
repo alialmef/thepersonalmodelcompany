@@ -76,6 +76,13 @@ def check_pmc_ingest() -> CheckResult:
             "pmc-ingest (Rust extractor binary)", "ok",
             detail=f"on PATH: {on_path}",
         )
+    # Standard install location (install.sh drops the prebuilt here)
+    user_bin = Path.home() / ".pmc" / "bin" / "pmc-ingest"
+    if user_bin.is_file():
+        return CheckResult(
+            "pmc-ingest (Rust extractor binary)", "ok",
+            detail=f"installed: {user_bin}",
+        )
     # Dev mode — built in the repo's target/release/examples/
     repo = Path(__file__).resolve().parents[2]
     dev = repo / "desktop/target/release/examples/pmc_ingest"
@@ -93,9 +100,10 @@ def check_pmc_ingest() -> CheckResult:
         )
     return CheckResult(
         "pmc-ingest (Rust extractor binary)", "error",
-        detail="not built and cargo isn't installed",
-        fix=("install Rust:  curl --proto '=https' --tlsv1.2 -sSf "
-             "https://sh.rustup.rs | sh"),
+        detail="no binary found and cargo isn't installed",
+        fix=("re-run the installer (it downloads a prebuilt binary):  "
+             "curl -sSL https://raw.githubusercontent.com/alialmef/"
+             "thepersonalmodelcompany/main/scripts/install.sh | bash"),
     )
 
 

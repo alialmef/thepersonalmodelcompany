@@ -90,6 +90,12 @@ thepersonalmodelcompany/
   not yet deployed.
 
 
+## License
+
+[FSL-1.1-Apache-2.0](LICENSE.md) — use it, run it, modify it freely; just
+don't resell it as a competing product. Each release becomes Apache 2.0
+two years after publication.
+
 ## Run the backend tests
 
 ```bash

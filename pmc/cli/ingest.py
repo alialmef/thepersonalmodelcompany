@@ -330,6 +330,12 @@ def _find_or_build(console: Console, *, allow_build: bool) -> Optional[Path]:
     if on_path:
         return Path(on_path)
 
+    # Standard install location — install.sh drops the prebuilt
+    # universal binary here.
+    user_bin = Path.home() / ".pmc" / "bin" / "pmc-ingest"
+    if user_bin.is_file():
+        return user_bin
+
     if _DEV_REL.is_file():
         return _DEV_REL
     if _DEV_DBG.is_file():
