@@ -99,7 +99,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     if args.json:
         # Passthrough mode for scripts.
         cmd = [str(binary), "--user", user_id, "--root", str(storage), "--json"]
-        return subprocess.call(cmd)
+        rc = subprocess.call(cmd)
+        if rc == 0:
+            _build_message_mirror(storage, user_id, console=None)
+        return rc
 
     if args.clear:
         console.clear()
@@ -116,11 +119,31 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         return 130
 
     if rc == 0:
+        _build_message_mirror(storage, user_id, console)
         console.print()
         ui.say(console, "you're in the graph.", style=ui.ACCENT)
         ui.say_dim(console, "run pmc chat to talk to your agent.")
         console.print()
     return rc
+
+
+def _build_message_mirror(storage: Path, user_id: str,
+                          console: Optional[Console]) -> None:
+    """Mirror message text into the user's store so search_messages
+    works from MCP hosts without them needing Full Disk Access."""
+    from pmc.storage.message_mirror import build_mirror, mirror_path
+
+    chat_db = Path.home() / "Library" / "Messages" / "chat.db"
+    if not chat_db.is_file():
+        return
+    try:
+        n = build_mirror(chat_db, mirror_path(storage, user_id))
+    except Exception as e:
+        if console is not None:
+            ui.say_dim(console, f"(message mirror skipped: {e})")
+        return
+    if console is not None:
+        ui.say_dim(console, f"message mirror: {n:,} messages")
 
 
 # ---------------------------------------------------------------------------

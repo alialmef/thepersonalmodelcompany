@@ -345,46 +345,80 @@ def _time_today(cfg: LocalConfig) -> str:
 
 
 def _search_messages(query: str, limit: int) -> str:
-    """Direct full-text search over chat.db. Read-only."""
+    """Search the user-owned message mirror (built by `pmc connect`).
+
+    The mirror avoids needing Full Disk Access in the MCP host app —
+    TCC attributes this process's file reads to the interpreter, not
+    the host, so live chat.db reads fail even when the host has FDA.
+    Falls back to live chat.db for setups that predate the mirror.
+    """
     if not query.strip():
         return "(empty query)"
     limit = max(1, min(50, limit))
-    fda_fix = (
-        "The app hosting this MCP server (e.g. Claude Desktop, Cursor) "
-        "needs Full Disk Access: System Settings → Privacy & Security → "
-        "Full Disk Access → enable that app, then quit and reopen it. "
-        "Tell the user exactly this — it is a one-time grant."
-    )
+
+    from pmc.cli.local_config import load
+    from pmc.storage.message_mirror import mirror_path, search_mirror
+
+    cfg = load()
+    if cfg is not None:
+        mirror = mirror_path(cfg.effective_storage_root(),
+                             cfg.user_id or "local")
+        if mirror.is_file():
+            try:
+                rows = search_mirror(mirror, query, limit)
+            except sqlite3.Error as e:
+                return f"(message mirror unreadable: {e})"
+            return _format_message_rows(rows, query)
+
+    # No mirror yet — try live chat.db (works only if this process's
+    # TCC identity has FDA, which is rare inside MCP hosts).
     db = Path("~/Library/Messages/chat.db").expanduser()
+    rebuild_fix = (
+        "No message mirror exists yet and chat.db isn't readable from "
+        "this process. Tell the user to run `pmc connect` in an "
+        "FDA-granted terminal — it builds a local, user-owned message "
+        "mirror that this tool searches without needing Full Disk "
+        "Access in the host app."
+    )
     if not db.is_file():
-        return f"(can't reach chat.db — almost certainly a permissions issue. {fda_fix})"
+        return f"({rebuild_fix})"
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
-    except sqlite3.Error as e:
-        return f"(can't open chat.db: {e}. {fda_fix})"
-    out_lines: list[str] = []
+    except sqlite3.Error:
+        return f"({rebuild_fix})"
     try:
         epoch_offset = 978307200
-        like = f"%{query.strip()}%"
-        for text, is_from_me, date, handle_id in conn.execute("""
-            SELECT m.text, m.is_from_me, m.date, h.id
-            FROM message m
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE m.text LIKE ?
-              AND m.text IS NOT NULL
-            ORDER BY m.date DESC
-            LIMIT ?
-        """, (like, limit)):
-            if text is None:
-                continue
-            ts = (date / 1e9 if date and date > 1e12 else date or 0) + epoch_offset
-            dt = (datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
-                  .isoformat(timespec="seconds")) if ts > epoch_offset else "?"
-            sender = "you" if is_from_me else (handle_id or "(unknown)")
-            text_clean = text.replace("\n", " ").strip()[:240]
-            out_lines.append(f"[{dt}] {sender}: {text_clean}")
+        rows = [
+            (
+                (date / 1e9 if date and date > 1e12 else date or 0)
+                + epoch_offset,
+                handle_id, is_from_me, text,
+            )
+            for text, is_from_me, date, handle_id in conn.execute("""
+                SELECT m.text, m.is_from_me, m.date, h.id
+                FROM message m
+                LEFT JOIN handle h ON m.handle_id = h.ROWID
+                WHERE m.text LIKE ?
+                  AND m.text IS NOT NULL
+                ORDER BY m.date DESC
+                LIMIT ?
+            """, (f"%{query.strip()}%", limit))
+            if text is not None
+        ]
     finally:
         conn.close()
+    return _format_message_rows(rows, query)
+
+
+def _format_message_rows(rows: list[tuple], query: str) -> str:
+    epoch_offset = 978307200
+    out_lines: list[str] = []
+    for ts, sender, is_from_me, text in rows:
+        dt = (datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
+              .isoformat(timespec="seconds")) if ts > epoch_offset else "?"
+        who = "you" if is_from_me else (sender or "(unknown)")
+        text_clean = text.replace("\n", " ").strip()[:240]
+        out_lines.append(f"[{dt}] {who}: {text_clean}")
     if not out_lines:
         return f"(no messages matching {query!r})"
     return "\n\n".join(out_lines)
