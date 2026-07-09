@@ -349,13 +349,19 @@ def _search_messages(query: str, limit: int) -> str:
     if not query.strip():
         return "(empty query)"
     limit = max(1, min(50, limit))
+    fda_fix = (
+        "The app hosting this MCP server (e.g. Claude Desktop, Cursor) "
+        "needs Full Disk Access: System Settings → Privacy & Security → "
+        "Full Disk Access → enable that app, then quit and reopen it. "
+        "Tell the user exactly this — it is a one-time grant."
+    )
     db = Path("~/Library/Messages/chat.db").expanduser()
     if not db.is_file():
-        return "(chat.db not found — search_messages requires macOS + FDA)"
+        return f"(can't reach chat.db — almost certainly a permissions issue. {fda_fix})"
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
     except sqlite3.Error as e:
-        return f"(can't open chat.db: {e})"
+        return f"(can't open chat.db: {e}. {fda_fix})"
     out_lines: list[str] = []
     try:
         epoch_offset = 978307200
