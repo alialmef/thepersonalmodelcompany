@@ -201,17 +201,33 @@ def _register_tools(server: Server, cfg: LocalConfig) -> None:
             types.Tool(
                 name="search_messages",
                 description=(
-                    "Full-text search across the user's iMessages. "
-                    "Returns the top matching messages with sender, "
-                    "timestamp, and the message text. Use sparingly — "
-                    "this reads the user's private comms."
+                    "Search the user's iMessages. Filter by text "
+                    "substring (query), by conversation partner "
+                    "(person — contact name or phone/email; matches "
+                    "the whole conversation including messages the "
+                    "user sent), and/or by date (since, YYYY-MM-DD). "
+                    "For 'what did X and I talk about', use person "
+                    "alone — the text rarely contains their name. "
+                    "Use sparingly — this reads the user's private "
+                    "comms."
                 ),
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "search query"
+                            "description": "text substring to match "
+                                           "(optional if person given)"
+                        },
+                        "person": {
+                            "type": "string",
+                            "description": "conversation partner — "
+                                           "contact name or handle"
+                        },
+                        "since": {
+                            "type": "string",
+                            "description": "only messages on/after "
+                                           "this date (YYYY-MM-DD)"
                         },
                         "limit": {
                             "type": "integer",
@@ -219,7 +235,6 @@ def _register_tools(server: Server, cfg: LocalConfig) -> None:
                             "description": "max results (1-50)"
                         },
                     },
-                    "required": ["query"],
                 },
             ),
         ]
@@ -262,7 +277,12 @@ async def _dispatch(cfg: LocalConfig, name: str, args: dict[str, Any]) -> str:
     if name == "recent_activity":
         return _strip_md_header(_read_portrait(cfg, "time_recent.md"))
     if name == "search_messages":
-        return _search_messages(args.get("query") or "", int(args.get("limit") or 10))
+        return _search_messages(
+            args.get("query") or "",
+            int(args.get("limit") or 10),
+            person=args.get("person") or None,
+            since=args.get("since") or None,
+        )
     return f"(unknown tool: {name})"
 
 
@@ -344,7 +364,9 @@ def _time_today(cfg: LocalConfig) -> str:
     )
 
 
-def _search_messages(query: str, limit: int) -> str:
+def _search_messages(query: str, limit: int,
+                     person: str | None = None,
+                     since: str | None = None) -> str:
     """Search the user-owned message mirror (built by `pmc connect`).
 
     The mirror avoids needing Full Disk Access in the MCP host app —
@@ -352,9 +374,16 @@ def _search_messages(query: str, limit: int) -> str:
     the host, so live chat.db reads fail even when the host has FDA.
     Falls back to live chat.db for setups that predate the mirror.
     """
-    if not query.strip():
-        return "(empty query)"
+    if not query.strip() and not (person or "").strip():
+        return "(give a text query, a person, or both)"
     limit = max(1, min(50, limit))
+
+    since_ts: float | None = None
+    if since:
+        try:
+            since_ts = datetime.strptime(since, "%Y-%m-%d").astimezone().timestamp()
+        except ValueError:
+            return f"(bad since date {since!r} — use YYYY-MM-DD)"
 
     from pmc.cli.local_config import load
     from pmc.storage.message_mirror import mirror_path, search_mirror
@@ -365,10 +394,17 @@ def _search_messages(query: str, limit: int) -> str:
                              cfg.user_id or "local")
         if mirror.is_file():
             try:
-                rows = search_mirror(mirror, query, limit)
+                rows = search_mirror(mirror, query, limit,
+                                     person=person, since_ts=since_ts)
             except sqlite3.Error as e:
                 return f"(message mirror unreadable: {e})"
-            return _format_message_rows(rows, query)
+            hint = ""
+            if not rows and (person or since):
+                mtime = datetime.fromtimestamp(
+                    mirror.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+                hint = (f" — note: the mirror was last refreshed "
+                        f"{mtime}; newer messages need `pmc connect`")
+            return _format_message_rows(rows, query or person or "", hint)
 
     # No mirror yet — try live chat.db (works only if this process's
     # TCC identity has FDA, which is rare inside MCP hosts).
@@ -392,7 +428,7 @@ def _search_messages(query: str, limit: int) -> str:
             (
                 (date / 1e9 if date and date > 1e12 else date or 0)
                 + epoch_offset,
-                handle_id, is_from_me, text,
+                handle_id, None, is_from_me, text,
             )
             for text, is_from_me, date, handle_id in conn.execute("""
                 SELECT m.text, m.is_from_me, m.date, h.id
@@ -407,20 +443,26 @@ def _search_messages(query: str, limit: int) -> str:
         ]
     finally:
         conn.close()
-    return _format_message_rows(rows, query)
+    note = (" — note: person/since filters need the message mirror; "
+            "run `pmc connect`") if (person or since) else ""
+    return _format_message_rows(rows, query, note)
 
 
-def _format_message_rows(rows: list[tuple], query: str) -> str:
+def _format_message_rows(rows: list[tuple], query: str,
+                         hint: str = "") -> str:
     epoch_offset = 978307200
     out_lines: list[str] = []
-    for ts, sender, is_from_me, text in rows:
+    for ts, sender, sender_name, is_from_me, text in rows:
         dt = (datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
               .isoformat(timespec="seconds")) if ts > epoch_offset else "?"
-        who = "you" if is_from_me else (sender or "(unknown)")
+        if is_from_me:
+            who = "you"
+        else:
+            who = sender_name or sender or "(unknown)"
         text_clean = text.replace("\n", " ").strip()[:240]
         out_lines.append(f"[{dt}] {who}: {text_clean}")
     if not out_lines:
-        return f"(no messages matching {query!r})"
+        return f"(no messages matching {query!r}{hint})"
     return "\n\n".join(out_lines)
 
 

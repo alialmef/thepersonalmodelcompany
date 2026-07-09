@@ -131,13 +131,17 @@ def _build_message_mirror(storage: Path, user_id: str,
                           console: Optional[Console]) -> None:
     """Mirror message text into the user's store so search_messages
     works from MCP hosts without them needing Full Disk Access."""
-    from pmc.storage.message_mirror import build_mirror, mirror_path
+    from pmc.storage.message_mirror import (
+        build_mirror, load_handle_names, mirror_path,
+    )
 
     chat_db = Path.home() / "Library" / "Messages" / "chat.db"
     if not chat_db.is_file():
         return
     try:
-        n = build_mirror(chat_db, mirror_path(storage, user_id))
+        names = load_handle_names(storage, user_id)
+        n = build_mirror(chat_db, mirror_path(storage, user_id),
+                         handle_names=names)
     except Exception as e:
         if console is not None:
             ui.say_dim(console, f"(message mirror skipped: {e})")
